@@ -252,4 +252,18 @@ describe('ChessForge Variant Engine', () => {
     const result = chooseAIMove(aiState, registry, 'tactician', analysis);
     expect(result.bestMove?.to).toEqual({ r: 2, c: 2 });
   });
+
+  it('Stage 5 (Crumbling Bridges) remains crossable even after all Fallow bridges collapse', () => {
+    const bridge = BUILTIN_BOARDS.find((b) => b.id === 'crumbling-bridge')!;
+    const state = createInitialGameState(bridge, registry);
+    // Collapse all row-3 fallow bridges into void
+    for (let c = 0; c < bridge.cols; c++) {
+      state.tiles[3][c] = { rule: 'void' };
+    }
+    // Place a White knight on row 4 (just below the chasm) and verify it can leap across to row 2
+    state.grid[4][2] = makePiece('knight', 'white');
+    const moves = generateLegalMoves(state.tiles, state.grid, 'white', registry, getBoardRules(bridge));
+    const leapAcross = moves.find((m) => m.from.r === 4 && m.from.c === 2 && m.to.r === 2);
+    expect(leapAcross).toBeDefined();
+  });
 });

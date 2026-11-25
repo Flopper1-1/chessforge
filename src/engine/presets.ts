@@ -333,7 +333,7 @@ function buildClassicChess(): BoardDefinition {
 
 function buildAcademySkirmish(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(5, 5);
-  addStandardPromotions(tiles, 'queen');
+  addStandardPromotions(tiles);
   const back = ['rook', 'knight', 'king', 'bishop', 'rook'];
   for (let c = 0; c < 5; c++) {
     pieces[0][c] = makePiece(back[c], 'black');
@@ -357,7 +357,7 @@ function buildAcademySkirmish(): BoardDefinition {
 
 function buildAcademyArchers(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(6, 6);
-  addStandardPromotions(tiles, 'queen');
+  addStandardPromotions(tiles);
   const back = ['rook', 'archer', 'king', 'queen', 'archer', 'rook'];
   for (let c = 0; c < 6; c++) {
     pieces[0][c] = makePiece(back[c], 'black');
@@ -381,7 +381,7 @@ function buildAcademyArchers(): BoardDefinition {
 
 function buildSanctuaryGarden(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(7, 7);
-  addStandardPromotions(tiles, 'queen');
+  addStandardPromotions(tiles);
   // Central sanctuary cross
   tiles[3][3] = { rule: 'sanctuary' };
   tiles[3][1] = { rule: 'sanctuary' };
@@ -432,30 +432,29 @@ function buildIronGate(): BoardDefinition {
 }
 
 function buildCrumblingBridge(): BoardDefinition {
-  const { tiles, pieces } = createEmptyGrid(8, 7);
-  // Carve a river chasm across rows 3 and 4 except 3 crumbling bridges
+  const { tiles, pieces } = createEmptyGrid(7, 7);
+  // Carve a 1-row central river chasm across row 3 with 3 Fallow bridges (3 uses each).
+  // Because the chasm is 1 row wide, Knights and Wizards can always leap across even if all 3 bridges collapse!
   for (let c = 0; c < 7; c++) {
     if (c === 1 || c === 3 || c === 5) {
-      tiles[3][c] = { rule: 'fallow', fallowUses: 2 };
-      tiles[4][c] = { rule: 'fallow', fallowUses: 2 };
+      tiles[3][c] = { rule: 'fallow', fallowUses: 3 };
     } else {
       tiles[3][c] = { rule: 'void' };
-      tiles[4][c] = { rule: 'void' };
     }
   }
-  addStandardPromotions(tiles, 'queen');
-  const back = ['rook', 'knight', 'gryphon', 'king', 'gryphon', 'knight', 'rook'];
+  addStandardPromotions(tiles);
+  const back = ['rook', 'knight', 'wizard', 'king', 'gryphon', 'knight', 'rook'];
   for (let c = 0; c < 7; c++) {
     pieces[0][c] = makePiece(back[c], 'black');
     pieces[1][c] = makePiece('pawn', 'black');
-    pieces[6][c] = makePiece('pawn', 'white');
-    pieces[7][c] = makePiece(back[c], 'white');
+    pieces[5][c] = makePiece('pawn', 'white');
+    pieces[6][c] = makePiece(back[c], 'white');
   }
   return {
     id: 'crumbling-bridge',
     name: 'Crumbling Bridges',
-    description: 'Three Fallow bridges span a central chasm — each bridge collapses into void after 2 crossings!',
-    rows: 8,
+    description: 'Three Fallow bridges span a 1-row chasm (3 crossings each). Rush your sliders across — Knights and Wizards can always leap the gap!',
+    rows: 7,
     cols: 7,
     tiles,
     initialPieces: pieces,
@@ -502,7 +501,7 @@ function buildIronFortress(): BoardDefinition {
 
 function buildTwinPortals(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(8, 8);
-  addStandardPromotions(tiles, 'queen');
+  addStandardPromotions(tiles);
   // Portal pair A on flanks, pair B diagonally
   tiles[2][0] = { rule: 'portal', portalChannel: 'A' };
   tiles[5][7] = { rule: 'portal', portalChannel: 'A' };
@@ -641,7 +640,7 @@ function buildGrandColosseum(): BoardDefinition {
 
 function buildRoyalTwinKings(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(8, 8);
-  addStandardPromotions(tiles, 'queen');
+  addStandardPromotions(tiles);
   tiles[3][3] = { rule: 'sanctuary' };
   tiles[4][4] = { rule: 'sanctuary' };
   const back = ['rook', 'knight', 'king', 'queen', 'bishop', 'king', 'knight', 'rook'];
