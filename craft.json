@@ -1,0 +1,13 @@
+{
+  "name": "ChessForge",
+  "mode": "clean-room",
+  "target": "https://store.steampowered.com/app/1635790/ChessCraft/",
+  "workflow": ["study", "build", "check", "ready"],
+  "status": "ready",
+  "stack": {
+    "frontend": "React 19 + TypeScript + Vite + Tailwind CSS",
+    "engine": "Pure TypeScript graph-aware variant chess engine & alpha-beta AI",
+    "tests": "Vitest"
+  },
+  "clean_room_policy": "Original code, original SVG artwork, original board designs, and original naming inspired by public feature descriptions."
+}
