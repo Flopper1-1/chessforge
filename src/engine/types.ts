@@ -58,6 +58,18 @@ export interface PieceRules {
   rangedAttack?: boolean;
   /** Allows a 2-step forward move on its first move (classic Pawn feel). */
   pawnDoubleStep?: boolean;
+  /** Can perform and be captured by En Passant after a 2-step move. */
+  enPassant?: boolean;
+  /** Can initiate castling as the Royal piece. */
+  castleKing?: boolean;
+  /** Can participate in castling as the Rook partner. */
+  castleRook?: boolean;
+  /** Atomic/Explosive capture: destroys adjacent non-Royal pieces in a 3x3 blast. */
+  explosive?: boolean;
+  /** Sliding rays can phase through friendly pieces. */
+  phasing?: boolean;
+  /** Eligible to promote on Promotion Zones (defaults to true for non-Royals). */
+  canPromote?: boolean;
 }
 
 export interface PieceDefinition {
@@ -89,11 +101,45 @@ export interface TileConfig {
   portalChannel?: PortalChannel;
   /** Which color(s) can promote on this tile. */
   promotionFor?: 'white' | 'black' | 'both';
-  /** Piece ID to promote into (defaults to 'queen' or strongest non-royal). */
+  /** Optional fixed piece ID to promote into. When omitted, player chooses from board's promotionPool! */
   promoteToPieceId?: string;
   /** Remaining steps allowed on a fallow tile before it crumbles to void. */
   fallowUses?: number;
 }
+
+export type BoardTheme =
+  | 'classic'
+  | 'stone'
+  | 'emerald'
+  | 'obsidian'
+  | 'sandstone'
+  | 'crimson'
+  | 'frost';
+
+export type PiecePalette = 'ivory' | 'royal_gold' | 'jade_ruby' | 'blueprint';
+
+export type WinCondition = 'checkmate' | 'king_of_the_hill' | 'annihilation';
+
+export interface BoardRuleSettings {
+  castlingEnabled: boolean;
+  enPassantEnabled: boolean;
+  drawByRepetition: boolean;
+  drawByFiftyMove: boolean;
+  drawByInsufficientMaterial: boolean;
+  winCondition: WinCondition;
+  /** Piece IDs the player can choose from when promoting. */
+  promotionPool: string[];
+}
+
+export const DEFAULT_BOARD_RULES: BoardRuleSettings = {
+  castlingEnabled: true,
+  enPassantEnabled: true,
+  drawByRepetition: true,
+  drawByFiftyMove: true,
+  drawByInsufficientMaterial: true,
+  winCondition: 'checkmate',
+  promotionPool: ['queen', 'rook', 'bishop', 'knight'],
+};
 
 export interface PlacedPiece {
   id: string; // unique instance id
@@ -115,7 +161,8 @@ export interface BoardDefinition {
   /** Custom piece definitions bundled with this board (for sharing/portability). */
   customPieces?: PieceDefinition[];
   difficulty?: 1 | 2 | 3;
-  theme?: 'classic' | 'stone' | 'emerald' | 'obsidian' | 'sandstone';
+  theme?: BoardTheme;
+  rules?: Partial<BoardRuleSettings>;
   isBuiltin?: boolean;
 }
 
@@ -131,10 +178,31 @@ export interface Move {
   portalExit?: Coord;
   /** True when a Ranged Attack captures on `to` while the attacker stays on `from`. */
   isRangedCapture?: boolean;
+  /** Castling partner rook movement */
+  castling?: {
+    rookFrom: Coord;
+    rookTo: Coord;
+    side: 'kingside' | 'queenside';
+  };
+  /** En passant capture square (where the captured pawn actually sits) */
+  enPassantCaptureCoord?: Coord;
+  /** True when a pawn performed a 2-step double push (sets enPassantTarget on next state) */
+  isDoubleStep?: boolean;
   captured?: PlacedPiece;
   promotedTo?: string;
+  /** When multiple promotion options exist on this square, UI opens the picker! */
+  promotionOptions?: string[];
   notation: string;
 }
+
+export type GameStatus =
+  | 'playing'
+  | 'check'
+  | 'checkmate'
+  | 'stalemate'
+  | 'draw'
+  | 'victory_white'
+  | 'victory_black';
 
 export interface GameState {
   boardDef: BoardDefinition;
@@ -146,10 +214,18 @@ export interface GameState {
   moveHistory: Move[];
   capturedByWhite: PlacedPiece[];
   capturedByBlack: PlacedPiece[];
-  status: 'playing' | 'check' | 'checkmate' | 'stalemate' | 'victory_white' | 'victory_black';
+  status: GameStatus;
   winner?: Color;
   statusReason?: string;
   halfMoveClock: number;
+  /** En passant target square available on the very next ply only. */
+  enPassantTarget?: {
+    targetSquare: Coord;
+    pawnSquare: Coord;
+    pawnColor: Color;
+  } | null;
+  /** Position hash -> occurrence count for threefold repetition detection. */
+  positionCounts: Record<string, number>;
 }
 
 export interface GraphPieceMetrics {
@@ -192,4 +268,13 @@ export interface AdventureProgress {
   completedNodeIds: string[];
   xp: number;
   gems: number;
+}
+
+export interface UIPreferences {
+  boardThemeOverride: BoardTheme | 'board_default';
+  piecePalette: PiecePalette;
+  showCoordinates: boolean;
+  showLegalMoves: boolean;
+  showLastMove: boolean;
+  soundEnabled: boolean;
 }

@@ -14,6 +14,7 @@ import {
 import {
   applyMoveToBoard,
   generateLegalMoves,
+  getBoardRules,
   isColorInCheck,
   oppositeColor,
   PieceRegistry,
@@ -81,6 +82,8 @@ export function analyzeBoardGraph(
     if (def.rules.rangedAttack) value += 210; // capturing without risking piece
     if (def.rules.iron) value += 360; // immune to normal captures
     if (def.rules.blacksmith) value += 130; // counters Iron
+    if (def.rules.explosive) value += 170; // 3x3 capture blast
+    if (def.rules.phasing) value += 110; // passes through friendlies
     if (def.rules.pawnDoubleStep) value += 35;
     if (def.rules.royal) value = 20000;
     else value = Math.max(85, value);
@@ -346,15 +349,22 @@ export function chooseAIMove(
   difficulty: AIDifficulty,
   cachedAnalysis?: BoardGraphAnalysis
 ): AISearchResult {
+  const rules = getBoardRules(state.boardDef);
   const pieceIds = collectBoardPieceIds(state.boardDef, state.grid, registry);
   const analysis = cachedAnalysis ?? analyzeBoardGraph(state.tiles, pieceIds, registry);
 
-  const legalMoves = generateLegalMoves(state.tiles, state.grid, state.turn, registry);
+  const legalMoves = generateLegalMoves(
+    state.tiles,
+    state.grid,
+    state.turn,
+    registry,
+    rules,
+    state.enPassantTarget
+  );
   if (legalMoves.length === 0) {
     return { bestMove: null, score: 0, nodesSearched: 0, depthReached: 0, analysis };
   }
 
-  // Novice plays depth 1-2 with slight randomness so beginners can win Adventure Island 1!
   const config =
     difficulty === 'novice'
       ? { maxDepth: 2, timeBudgetMs: 180, noise: 65 }
@@ -387,9 +397,9 @@ export function chooseAIMove(
       return evaluatePosition(tiles, grid, analysis, registry);
     }
 
-    const moves = generateLegalMoves(tiles, grid, turn, registry);
+    const moves = generateLegalMoves(tiles, grid, turn, registry, rules);
     if (moves.length === 0) {
-      const inCheck = isColorInCheck(tiles, grid, turn, registry);
+      const inCheck = isColorInCheck(tiles, grid, turn, registry, rules);
       if (inCheck) {
         return turn === 'white' ? -100000 - depth * 100 : 100000 + depth * 100;
       }
@@ -401,7 +411,7 @@ export function chooseAIMove(
     if (turn === 'white') {
       let value = -Infinity;
       for (const m of moves) {
-        const next = applyMoveToBoard(tiles, grid, m);
+        const next = applyMoveToBoard(tiles, grid, m, registry);
         const child = alphabeta(next.tiles, next.grid, depth - 1, alpha, beta, 'black');
         if (child > value) value = child;
         if (value > alpha) alpha = value;
@@ -411,7 +421,7 @@ export function chooseAIMove(
     } else {
       let value = Infinity;
       for (const m of moves) {
-        const next = applyMoveToBoard(tiles, grid, m);
+        const next = applyMoveToBoard(tiles, grid, m, registry);
         const child = alphabeta(next.tiles, next.grid, depth - 1, alpha, beta, 'white');
         if (child < value) value = child;
         if (value < beta) beta = value;
@@ -428,7 +438,7 @@ export function chooseAIMove(
 
     for (const m of ordered) {
       if (depth > 1 && performance.now() > deadline) break;
-      const next = applyMoveToBoard(state.tiles, state.grid, m);
+      const next = applyMoveToBoard(state.tiles, state.grid, m, registry);
       let score = alphabeta(
         next.tiles,
         next.grid,

@@ -1,12 +1,38 @@
 import React from 'react';
-import { Color, PieceIconId, PieceRules } from '../engine/types';
+import { Color, PieceIconId, PiecePalette, PieceRules } from '../engine/types';
 
 interface PieceIconProps {
   icon: PieceIconId;
   color: Color;
   rules?: PieceRules;
+  palette?: PiecePalette;
   className?: string;
 }
+
+const PALETTES: Record<
+  PiecePalette,
+  {
+    white: { fill: string; stroke: string; accent: string };
+    black: { fill: string; stroke: string; accent: string };
+  }
+> = {
+  ivory: {
+    white: { fill: '#f8f1df', stroke: '#3a2a19', accent: '#d49a35' },
+    black: { fill: '#262120', stroke: '#e6c580', accent: '#b8862e' },
+  },
+  royal_gold: {
+    white: { fill: '#fff7d6', stroke: '#713f12', accent: '#f59e0b' },
+    black: { fill: '#1e1b2e', stroke: '#c084fc', accent: '#a855f7' },
+  },
+  jade_ruby: {
+    white: { fill: '#d1fae5', stroke: '#064e3b', accent: '#10b981' },
+    black: { fill: '#4c0519', stroke: '#fda4af', accent: '#f43f5e' },
+  },
+  blueprint: {
+    white: { fill: '#e0f2fe', stroke: '#0c4a6e', accent: '#38bdf8' },
+    black: { fill: '#0f172a', stroke: '#93c5fd', accent: '#60a5fa' },
+  },
+};
 
 export const PIECE_ICON_LIST: { id: PieceIconId; label: string }[] = [
   { id: 'king', label: 'King' },
@@ -35,12 +61,14 @@ export const PieceIcon: React.FC<PieceIconProps> = ({
   icon,
   color,
   rules,
+  palette = 'ivory',
   className = 'w-full h-full',
 }) => {
   const isWhite = color === 'white';
-  const fill = isWhite ? '#f8f1df' : '#262120';
-  const stroke = isWhite ? '#3a2a19' : '#e6c580';
-  const accent = isWhite ? '#d49a35' : '#b8862e';
+  const scheme = (PALETTES[palette] ?? PALETTES.ivory)[color];
+  const fill = scheme.fill;
+  const stroke = scheme.stroke;
+  const accent = scheme.accent;
 
   const renderShape = () => {
     switch (icon) {

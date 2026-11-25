@@ -24,7 +24,7 @@ export const BUILTIN_PIECES: PieceDefinition[] = [
       { dr: 1, dc: 1, mode: 'both' },
     ],
     slides: {},
-    rules: { royal: true },
+    rules: { royal: true, castleKing: true },
     isBuiltin: true,
   },
   {
@@ -43,10 +43,10 @@ export const BUILTIN_PIECES: PieceDefinition[] = [
     name: 'Rook',
     shortCode: 'R',
     icon: 'rook',
-    description: 'Slides any distance along ranks and files.',
+    description: 'Slides any distance along ranks and files. Can castle with an unmoved King.',
     hops: [],
     slides: { N: 16, E: 16, S: 16, W: 16 },
-    rules: {},
+    rules: { castleRook: true },
     isBuiltin: true,
   },
   {
@@ -85,14 +85,14 @@ export const BUILTIN_PIECES: PieceDefinition[] = [
     name: 'Pawn',
     shortCode: 'P',
     icon: 'pawn',
-    description: 'Steps forward 1 (or 2 on first move) and captures diagonally forward.',
+    description: 'Steps forward 1 (or 2 on first move), captures diagonally forward, supports En Passant, and promotes on the far rank.',
     hops: [
       { dr: -1, dc: 0, mode: 'move' },
       { dr: -1, dc: -1, mode: 'capture' },
       { dr: -1, dc: 1, mode: 'capture' },
     ],
     slides: {},
-    rules: { pawnDoubleStep: true },
+    rules: { pawnDoubleStep: true, enPassant: true, canPromote: true },
     isBuiltin: true,
   },
   {
@@ -238,6 +238,37 @@ export const BUILTIN_PIECES: PieceDefinition[] = [
     rules: {},
     isBuiltin: true,
   },
+  {
+    id: 'bombardier',
+    name: 'Bombardier',
+    shortCode: 'X',
+    icon: 'cannon',
+    description: 'Explosive siege engine: hops 2 squares orthogonally or 1 diagonally. Capturing triggers a 3×3 blast!',
+    hops: [
+      { dr: -2, dc: 0, mode: 'both' },
+      { dr: 2, dc: 0, mode: 'both' },
+      { dr: 0, dc: -2, mode: 'both' },
+      { dr: 0, dc: 2, mode: 'both' },
+      { dr: -1, dc: -1, mode: 'both' },
+      { dr: -1, dc: 1, mode: 'both' },
+      { dr: 1, dc: -1, mode: 'both' },
+      { dr: 1, dc: 1, mode: 'both' },
+    ],
+    slides: {},
+    rules: { explosive: true },
+    isBuiltin: true,
+  },
+  {
+    id: 'phantom',
+    name: 'Phantom',
+    shortCode: 'F',
+    icon: 'ghost',
+    description: 'Spectral slider: glides up to 4 squares diagonally and phases right through friendly pieces.',
+    hops: [],
+    slides: { NE: 4, SE: 4, SW: 4, NW: 4 },
+    rules: { phasing: true },
+    isBuiltin: true,
+  },
 ];
 
 let uidCounter = 1;
@@ -263,22 +294,22 @@ function createEmptyGrid(rows: number, cols: number): {
   return { tiles, pieces };
 }
 
-function addStandardPromotions(tiles: TileConfig[][], promoteTo = 'queen') {
+function addStandardPromotions(tiles: TileConfig[][], fixedPieceId?: string) {
   const rows = tiles.length;
   const cols = tiles[0].length;
   for (let c = 0; c < cols; c++) {
     if (tiles[0][c].rule === 'normal') {
-      tiles[0][c] = { rule: 'promotion', promotionFor: 'white', promoteToPieceId: promoteTo };
+      tiles[0][c] = { rule: 'promotion', promotionFor: 'white', promoteToPieceId: fixedPieceId };
     }
     if (tiles[rows - 1][c].rule === 'normal') {
-      tiles[rows - 1][c] = { rule: 'promotion', promotionFor: 'black', promoteToPieceId: promoteTo };
+      tiles[rows - 1][c] = { rule: 'promotion', promotionFor: 'black', promoteToPieceId: fixedPieceId };
     }
   }
 }
 
 function buildClassicChess(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(8, 8);
-  addStandardPromotions(tiles, 'queen');
+  addStandardPromotions(tiles);
   const back = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
   for (let c = 0; c < 8; c++) {
     pieces[0][c] = makePiece(back[c], 'black');

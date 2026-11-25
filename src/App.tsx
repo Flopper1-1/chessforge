@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Compass,
   Grid,
   Hammer,
+  Sliders,
   Swords,
   Volume2,
   VolumeX,
@@ -12,18 +13,24 @@ import {
   AdventureNode,
   AdventureProgress,
   BoardDefinition,
+  BoardTheme,
   PieceDefinition,
+  PiecePalette,
+  UIPreferences,
 } from './engine/types';
 import { PieceRegistry } from './engine/rules';
 import {
   loadAdventureProgress,
   loadCustomBoards,
   loadCustomPieces,
+  loadUIPreferences,
   saveAdventureProgress,
   saveCustomBoards,
   saveCustomPieces,
+  saveUIPreferences,
 } from './engine/storage';
 import { soundEngine } from './engine/sound';
+import { BOARD_THEME_COLORS } from './components/ChessBoardView';
 import { PlayView } from './components/PlayView';
 import { AdventureView } from './components/AdventureView';
 import { PieceForgeView } from './components/PieceForgeView';
@@ -32,34 +39,38 @@ import { BoardForgeView } from './components/BoardForgeView';
 type Tab = 'adventure' | 'play' | 'piece-forge' | 'board-forge';
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('adventure');
+  const [tab, setTab] = useState<Tab>('play');
   const [customPieces, setCustomPieces] = useState<PieceDefinition[]>(() => loadCustomPieces());
   const [customBoards, setCustomBoards] = useState<BoardDefinition[]>(() => loadCustomBoards());
   const [progress, setProgress] = useState<AdventureProgress>(() => loadAdventureProgress());
+  const [uiPrefs, setUiPrefs] = useState<UIPreferences>(() => loadUIPreferences());
+  const [showSettings, setShowSettings] = useState(false);
   const [activeBoardId, setActiveBoardId] = useState<string>('classic-chess');
   const [activeAdventureNode, setActiveAdventureNode] = useState<AdventureNode | null>(null);
   const [boardToEdit, setBoardToEdit] = useState<BoardDefinition | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
 
-  const allPieces = useMemo(
-    () => [...BUILTIN_PIECES, ...customPieces],
-    [customPieces]
-  );
+  useEffect(() => {
+    soundEngine.enabled = uiPrefs.soundEnabled;
+    saveUIPreferences(uiPrefs);
+  }, [uiPrefs]);
+
+  const allPieces = useMemo(() => [...BUILTIN_PIECES, ...customPieces], [customPieces]);
 
   const registry: PieceRegistry = useMemo(
     () => Object.fromEntries(allPieces.map((p) => [p.id, p])),
     [allPieces]
   );
 
-  const allBoards = useMemo(
-    () => [...BUILTIN_BOARDS, ...customBoards],
-    [customBoards]
-  );
+  const allBoards = useMemo(() => [...BUILTIN_BOARDS, ...customBoards], [customBoards]);
 
   const activeBoard = useMemo(
     () => allBoards.find((b) => b.id === activeBoardId) ?? BUILTIN_BOARDS[0],
     [allBoards, activeBoardId]
   );
+
+  function updatePrefs(patch: Partial<UIPreferences>) {
+    setUiPrefs((prev) => ({ ...prev, ...patch }));
+  }
 
   function handleSavePiece(piece: PieceDefinition) {
     setCustomPieces((prev) => {
@@ -137,15 +148,9 @@ export default function App() {
     setActiveBoardId(newBoard.id);
   }
 
-  function toggleSound() {
-    const next = !soundOn;
-    setSoundOn(next);
-    soundEngine.enabled = next;
-  }
-
   const navItems: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'adventure', label: 'Adventure', icon: <Compass className="w-4 h-4" /> },
     { id: 'play', label: 'Play Arena', icon: <Swords className="w-4 h-4" /> },
+    { id: 'adventure', label: 'Adventure', icon: <Compass className="w-4 h-4" /> },
     { id: 'piece-forge', label: 'Piece Forge', icon: <Hammer className="w-4 h-4" /> },
     { id: 'board-forge', label: 'Board Forge', icon: <Grid className="w-4 h-4" /> },
   ];
@@ -191,12 +196,21 @@ export default function App() {
 
             <button
               type="button"
-              onClick={toggleSound}
-              className="ml-1 p-2 rounded-xl bg-[#221a13] border border-amber-500/20 text-amber-300 hover:border-amber-400 cursor-pointer"
-              title={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
-              aria-label={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
+              onClick={() => setShowSettings(true)}
+              className="ml-1 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#221a13] border border-amber-500/25 text-xs font-semibold text-amber-200 hover:border-amber-400 cursor-pointer"
+              title="Customize board theme, piece colors, and display"
             >
-              {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              <Sliders className="w-3.5 h-3.5" /> Customize
+            </button>
+
+            <button
+              type="button"
+              onClick={() => updatePrefs({ soundEnabled: !uiPrefs.soundEnabled })}
+              className="p-2 rounded-xl bg-[#221a13] border border-amber-500/20 text-amber-300 hover:border-amber-400 cursor-pointer"
+              title={uiPrefs.soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
+              aria-label={uiPrefs.soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
+            >
+              {uiPrefs.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
           </nav>
         </div>
@@ -224,6 +238,8 @@ export default function App() {
             }}
             registry={registry}
             allPieces={allPieces}
+            uiPrefs={uiPrefs}
+            onOpenSettings={() => setShowSettings(true)}
             activeAdventureNode={activeAdventureNode}
             onAdventureVictory={handleAdventureVictory}
             onImportBoard={handleImportBoard}
@@ -237,6 +253,7 @@ export default function App() {
         {tab === 'piece-forge' && (
           <PieceForgeView
             pieces={allPieces}
+            piecePalette={uiPrefs.piecePalette}
             onSavePiece={handleSavePiece}
             onDeletePiece={handleDeletePiece}
           />
@@ -248,6 +265,7 @@ export default function App() {
             initialBoard={boardToEdit}
             pieces={allPieces}
             registry={registry}
+            piecePalette={uiPrefs.piecePalette}
             onSaveBoard={handleSaveBoard}
             onDeleteBoard={handleDeleteBoard}
             onTestPlay={(board) => {
@@ -258,6 +276,107 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Global Appearance & Display Customization Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="parchment-panel rounded-2xl max-w-md w-full p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-lg font-bold text-amber-200">
+                Customize Appearance &amp; Display
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                className="text-stone-400 hover:text-white text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="pref-theme" className="text-xs font-semibold text-stone-300">
+                Board Theme Override
+              </label>
+              <select
+                id="pref-theme"
+                value={uiPrefs.boardThemeOverride}
+                onChange={(e) =>
+                  updatePrefs({ boardThemeOverride: e.target.value as BoardTheme | 'board_default' })
+                }
+                className="w-full rounded-lg bg-[#16110d] border border-amber-500/30 px-3 py-2 text-sm text-amber-50"
+              >
+                <option value="board_default">Use Each Board&apos;s Theme</option>
+                {(Object.keys(BOARD_THEME_COLORS) as BoardTheme[]).map((t) => (
+                  <option key={t} value={t}>
+                    {BOARD_THEME_COLORS[t].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-stone-300">Piece Color Palette</span>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ['ivory', 'Ivory & Obsidian'],
+                    ['royal_gold', 'Royal Gold & Amethyst'],
+                    ['jade_ruby', 'Jade & Ruby'],
+                    ['blueprint', 'Ice & Midnight'],
+                  ] as [PiecePalette, string][]
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => updatePrefs({ piecePalette: id })}
+                    className={`py-2 px-3 rounded-lg text-xs font-medium border text-left cursor-pointer ${
+                      uiPrefs.piecePalette === id
+                        ? 'bg-amber-500/25 border-amber-400 text-amber-100'
+                        : 'bg-[#18120d] border-amber-500/15 text-stone-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <span className="text-xs font-semibold text-stone-300">Board Aids</span>
+              {(
+                [
+                  ['showLegalMoves', 'Highlight Legal Moves (dots, Castling ⇄, En Passant EP)'],
+                  ['showLastMove', 'Highlight Last Move Squares'],
+                  ['showCoordinates', 'Show Rank & File Coordinates (a1–h8)'],
+                  ['soundEnabled', 'Enable Tactile Sound Effects'],
+                ] as const
+              ).map(([key, label]) => (
+                <label
+                  key={key}
+                  className="flex items-center gap-2.5 p-2 rounded-lg bg-[#19130e] border border-amber-500/15 text-xs text-stone-200 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={uiPrefs[key]}
+                    onChange={(e) => updatePrefs({ [key]: e.target.checked })}
+                    className="accent-amber-500"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSettings(false)}
+              className="w-full py-2.5 rounded-xl bg-amber-500 text-stone-950 font-bold text-xs hover:bg-amber-400 cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-amber-500/15 py-3 text-center text-xs text-stone-500">

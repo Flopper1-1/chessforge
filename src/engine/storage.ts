@@ -1,10 +1,38 @@
-import { AdventureProgress, BoardDefinition, PieceDefinition } from './types';
+import { AdventureProgress, BoardDefinition, PieceDefinition, UIPreferences } from './types';
 
 const KEYS = {
   CUSTOM_PIECES: 'chessforge_custom_pieces_v1',
   CUSTOM_BOARDS: 'chessforge_custom_boards_v1',
   ADVENTURE: 'chessforge_adventure_v1',
+  UI_PREFS: 'chessforge_ui_prefs_v1',
 };
+
+export const DEFAULT_UI_PREFS: UIPreferences = {
+  boardThemeOverride: 'board_default',
+  piecePalette: 'ivory',
+  showCoordinates: true,
+  showLegalMoves: true,
+  showLastMove: true,
+  soundEnabled: true,
+};
+
+export function loadUIPreferences(): UIPreferences {
+  try {
+    const raw = localStorage.getItem(KEYS.UI_PREFS);
+    if (!raw) return DEFAULT_UI_PREFS;
+    return { ...DEFAULT_UI_PREFS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_UI_PREFS;
+  }
+}
+
+export function saveUIPreferences(prefs: UIPreferences) {
+  try {
+    localStorage.setItem(KEYS.UI_PREFS, JSON.stringify(prefs));
+  } catch {
+    // ignore
+  }
+}
 
 export function loadCustomPieces(): PieceDefinition[] {
   try {

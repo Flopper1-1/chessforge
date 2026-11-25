@@ -6,6 +6,7 @@ import {
   HopOffset,
   PieceDefinition,
   PieceIconId,
+  PiecePalette,
   SlideRanges,
 } from '../engine/types';
 import { estimatePieceValueOnStandardBoard } from '../engine/graphAi';
@@ -13,6 +14,7 @@ import { PIECE_ICON_LIST, PieceIcon } from './PieceIcon';
 
 interface PieceForgeViewProps {
   pieces: PieceDefinition[];
+  piecePalette: PiecePalette;
   onSavePiece: (piece: PieceDefinition) => void;
   onDeletePiece: (pieceId: string) => void;
 }
@@ -35,17 +37,19 @@ function createBlankPiece(): PieceDefinition {
       { dr: -2, dc: 1, mode: 'both' },
     ],
     slides: { NE: 4, NW: 4 },
-    rules: {},
+    rules: { canPromote: true },
     isBuiltin: false,
   };
 }
 
 export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
   pieces,
+  piecePalette,
   onSavePiece,
   onDeletePiece,
 }) => {
   const [draft, setDraft] = useState<PieceDefinition>(() => createBlankPiece());
+  const [mirrorHops, setMirrorHops] = useState(true);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
   const liveEstimate = useMemo(() => estimatePieceValueOnStandardBoard(draft), [draft]);
@@ -62,17 +66,26 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
       ? 'both'
       : nextOrder[(nextOrder.indexOf(existing.mode) + 1) % nextOrder.length];
 
-    const filtered = draft.hops.filter((h) => !(h.dr === dr && h.dc === dc));
+    const targets: { dr: number; dc: number }[] = [{ dr, dc }];
+    if (mirrorHops && dc !== 0) {
+      targets.push({ dr, dc: -dc });
+    }
+
+    const filtered = draft.hops.filter(
+      (h) => !targets.some((t) => t.dr === h.dr && t.dc === h.dc)
+    );
     if (nextMode) {
-      filtered.push({ dr, dc, mode: nextMode });
+      for (const t of targets) {
+        filtered.push({ dr: t.dr, dc: t.dc, mode: nextMode });
+      }
     }
     setDraft({ ...draft, hops: filtered });
   }
 
-  function toggleSlide(dir: Direction8) {
+  function cycleSlide(dir: Direction8) {
     const current = draft.slides[dir] ?? 0;
-    // Cycle 0 -> 16 (Unlimited) -> 3 -> 1 -> 0
-    const next = current === 0 ? 16 : current === 16 ? 3 : current === 3 ? 1 : 0;
+    const steps = [0, 16, 4, 2, 1];
+    const next = steps[(steps.indexOf(current) + 1) % steps.length] ?? 16;
     const nextSlides: SlideRanges = { ...draft.slides };
     if (next === 0) delete nextSlides[dir];
     else nextSlides[dir] = next;
@@ -86,6 +99,40 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
     else setDraft({ ...draft, slides: { N: 16, NE: 16, E: 16, SE: 16, S: 16, SW: 16, W: 16, NW: 16 } });
   }
 
+  function applyHopPreset(preset: 'none' | 'knight' | 'camel' | 'king') {
+    if (preset === 'none') setDraft({ ...draft, hops: [] });
+    else if (preset === 'knight') {
+      setDraft({
+        ...draft,
+        hops: [
+          { dr: -2, dc: -1, mode: 'both' }, { dr: -2, dc: 1, mode: 'both' },
+          { dr: -1, dc: -2, mode: 'both' }, { dr: -1, dc: 2, mode: 'both' },
+          { dr: 1, dc: -2, mode: 'both' }, { dr: 1, dc: 2, mode: 'both' },
+          { dr: 2, dc: -1, mode: 'both' }, { dr: 2, dc: 1, mode: 'both' },
+        ],
+      });
+    } else if (preset === 'camel') {
+      setDraft({
+        ...draft,
+        hops: [
+          { dr: -3, dc: -1, mode: 'both' }, { dr: -3, dc: 1, mode: 'both' },
+          { dr: -1, dc: -3, mode: 'both' }, { dr: -1, dc: 3, mode: 'both' },
+          { dr: 1, dc: -3, mode: 'both' }, { dr: 1, dc: 3, mode: 'both' },
+          { dr: 3, dc: -1, mode: 'both' }, { dr: 3, dc: 1, mode: 'both' },
+        ],
+      });
+    } else {
+      setDraft({
+        ...draft,
+        hops: [
+          { dr: -1, dc: -1, mode: 'both' }, { dr: -1, dc: 0, mode: 'both' }, { dr: -1, dc: 1, mode: 'both' },
+          { dr: 0, dc: -1, mode: 'both' }, { dr: 0, dc: 1, mode: 'both' },
+          { dr: 1, dc: -1, mode: 'both' }, { dr: 1, dc: 0, mode: 'both' }, { dr: 1, dc: 1, mode: 'both' },
+        ],
+      });
+    }
+  }
+
   function handleSave() {
     const clean: PieceDefinition = {
       ...draft,
@@ -96,8 +143,8 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
     };
     onSavePiece(clean);
     setDraft(clean);
-    setSavedNotice(`Saved "${clean.name}" to your Piece Library!`);
-    window.setTimeout(() => setSavedNotice(null), 2600);
+    setSavedNotice(`Saved "${clean.name}" — now available in Board Forge and Promotion Pools!`);
+    window.setTimeout(() => setSavedNotice(null), 3000);
   }
 
   return (
@@ -105,18 +152,21 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
       {/* Left: Piece Library */}
       <div className="lg:col-span-3 parchment-panel rounded-2xl p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-amber-300">
-            Piece Library
-          </h3>
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wider text-amber-300">
+              Piece Library
+            </h3>
+            <p className="text-[11px] text-stone-400">Pick a piece to edit or clone</p>
+          </div>
           <button
             type="button"
             onClick={() => setDraft(createBlankPiece())}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-600 text-stone-950 text-xs font-bold hover:bg-amber-500 cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-600 text-stone-950 text-xs font-bold hover:bg-amber-500 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" /> New
           </button>
         </div>
-        <div className="space-y-1.5 max-h-[560px] overflow-y-auto pr-1">
+        <div className="space-y-1.5 max-h-[600px] overflow-y-auto pr-1">
           {pieces.map((p) => {
             const selected = draft.id === p.id;
             return (
@@ -130,11 +180,18 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
               >
                 <button
                   type="button"
-                  onClick={() => setDraft({ ...p, hops: [...p.hops], slides: { ...p.slides }, rules: { ...p.rules } })}
+                  onClick={() =>
+                    setDraft({
+                      ...p,
+                      hops: [...p.hops],
+                      slides: { ...p.slides },
+                      rules: { ...p.rules },
+                    })
+                  }
                   className="flex items-center gap-2.5 text-left flex-1 cursor-pointer"
                 >
                   <span className="w-7 h-7 shrink-0">
-                    <PieceIcon icon={p.icon} color="white" rules={p.rules} />
+                    <PieceIcon icon={p.icon} color="white" rules={p.rules} palette={piecePalette} />
                   </span>
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-amber-100 truncate">
@@ -161,30 +218,54 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
         </div>
       </div>
 
-      {/* Center: 7x7 Hop Grid + 8-Direction Slide Compass */}
+      {/* Center: Movement Designer */}
       <div className="lg:col-span-5 space-y-5">
+        {/* Step 1: 7x7 Hop Grid */}
         <div className="parchment-panel rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h3 className="font-display text-base font-bold text-amber-200">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                Step 1 · Leaping Moves
+              </div>
+              <h3 className="font-display text-base font-bold text-amber-100">
                 7×7 Relative Hop Grid
               </h3>
-              <p className="text-xs text-stone-400">
-                Click tiles to cycle: <span className="text-emerald-300">Move+Capture</span> →{' '}
-                <span className="text-sky-300">Move Only</span> →{' '}
-                <span className="text-rose-300">Capture Only</span> → Off. Hops jump over pieces!
+              <p className="text-xs text-stone-400 mt-0.5">
+                Hops jump over obstacles. Click any square to cycle its mode.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setDraft({ ...draft, hops: [] })}
-              className="text-xs text-stone-400 hover:text-amber-300 underline cursor-pointer"
-            >
-              Clear
-            </button>
+            <label className="inline-flex items-center gap-1.5 text-xs text-amber-200 cursor-pointer bg-[#19130e] px-2.5 py-1 rounded-lg border border-amber-500/25">
+              <input
+                type="checkbox"
+                checked={mirrorHops}
+                onChange={(e) => setMirrorHops(e.target.checked)}
+                className="accent-amber-500"
+              />
+              Mirror L/R
+            </label>
           </div>
 
-          <div className="grid grid-cols-7 gap-1.5 max-w-[360px] mx-auto">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <div className="flex gap-2">
+              <span className="text-emerald-300">● Move+Capture</span>
+              <span className="text-sky-300">○ Move Only</span>
+              <span className="text-rose-300">× Capture Only</span>
+            </div>
+            <div className="flex gap-1">
+              {(['knight', 'camel', 'king', 'none'] as const).map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => applyHopPreset(preset)}
+                  className="px-2 py-0.5 rounded bg-[#1b1510] border border-amber-500/25 capitalize text-amber-200 hover:border-amber-400 cursor-pointer"
+                >
+                  {preset === 'none' ? 'Clear' : preset}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1.5 max-w-[350px] mx-auto">
             {Array.from({ length: 7 }, (_, rIdx) => {
               const dr = rIdx - 3;
               return Array.from({ length: 7 }, (_, cIdx) => {
@@ -198,7 +279,7 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
                       key={`${dr},${dc}`}
                       className="aspect-square rounded-lg bg-amber-500/25 border-2 border-amber-400 flex items-center justify-center p-1"
                     >
-                      <PieceIcon icon={draft.icon} color="white" rules={draft.rules} />
+                      <PieceIcon icon={draft.icon} color="white" rules={draft.rules} palette={piecePalette} />
                     </div>
                   );
                 }
@@ -232,26 +313,29 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
           </div>
         </div>
 
-        {/* 8-Direction Slide Compass */}
+        {/* Step 2: 8-Direction Slide Compass */}
         <div className="parchment-panel rounded-2xl p-5 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h3 className="font-display text-base font-bold text-amber-200">
-                8-Direction Sliding Rays
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                Step 2 · Sliding Rays
+              </div>
+              <h3 className="font-display text-base font-bold text-amber-100">
+                8-Direction Slide Compass
               </h3>
-              <p className="text-xs text-stone-400">
-                Click any compass ray to cycle distance: Off → ∞ (Full) → 3 → 1.
+              <p className="text-xs text-stone-400 mt-0.5">
+                Click any ray to cycle distance: Off → ∞ → 4 → 2 → 1.
               </p>
             </div>
             <div className="flex gap-1.5">
-              {(['none', 'rook', 'bishop', 'queen'] as const).map((preset) => (
+              {(['rook', 'bishop', 'queen', 'none'] as const).map((preset) => (
                 <button
                   key={preset}
                   type="button"
                   onClick={() => applySlidePreset(preset)}
                   className="px-2 py-1 rounded bg-[#1b1510] border border-amber-500/25 text-[11px] capitalize text-amber-200 hover:border-amber-400 cursor-pointer"
                 >
-                  {preset}
+                  {preset === 'none' ? 'Clear' : preset}
                 </button>
               ))}
             </div>
@@ -265,7 +349,7 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
                     key="center"
                     className="aspect-square rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center p-2"
                   >
-                    <PieceIcon icon={draft.icon} color="white" rules={draft.rules} />
+                    <PieceIcon icon={draft.icon} color="white" rules={draft.rules} palette={piecePalette} />
                   </div>
                 );
               }
@@ -274,7 +358,7 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
                 <button
                   key={dir}
                   type="button"
-                  onClick={() => toggleSlide(dir)}
+                  onClick={() => cycleSlide(dir)}
                   className={`aspect-square rounded-xl border flex flex-col items-center justify-center transition cursor-pointer ${
                     dist > 0
                       ? 'bg-amber-500/25 border-amber-400 text-amber-100'
@@ -292,17 +376,17 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
         </div>
       </div>
 
-      {/* Right: Metadata, Special Rules, Icon Picker & Live Graph Value */}
+      {/* Right: Step 3 Metadata, Special Rules, Emblem & Save */}
       <div className="lg:col-span-4 space-y-4">
-        {/* Live Graph Value */}
+        {/* Live Graph Valuation */}
         <div className="parchment-panel rounded-2xl p-4 flex items-center justify-between border-amber-400/40">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-xl bg-[#18120d] border border-amber-500/30 p-1.5">
-              <PieceIcon icon={draft.icon} color="white" rules={draft.rules} />
+              <PieceIcon icon={draft.icon} color="white" rules={draft.rules} palette={piecePalette} />
             </div>
             <div>
               <div className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
-                <Sparkles className="w-3.5 h-3.5" /> Live Graph Valuation
+                <Sparkles className="w-3.5 h-3.5" /> Graph AI Valuation
               </div>
               <div className="text-xl font-mono font-bold text-amber-100">
                 {draft.rules.royal ? 'ROYAL' : `${liveEstimate.points} pts`}
@@ -310,19 +394,26 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] uppercase text-stone-400">Avg Mobility</div>
+            <div className="text-[10px] uppercase text-stone-400">Avg Reach</div>
             <div className="font-mono text-sm font-bold text-sky-300">
               {liveEstimate.avgMobility} sq
             </div>
           </div>
         </div>
 
-        {/* Identity & Rules */}
+        {/* Identity & Special Rules */}
         <div className="parchment-panel rounded-2xl p-4 space-y-3.5">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+            Step 3 · Identity &amp; Special Abilities
+          </div>
+
           <div className="grid grid-cols-3 gap-2.5">
             <div className="col-span-2">
-              <label className="text-[11px] uppercase tracking-wider text-stone-400">Name</label>
+              <label htmlFor="piece-name" className="text-[11px] uppercase tracking-wider text-stone-400">
+                Name
+              </label>
               <input
+                id="piece-name"
                 type="text"
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -330,8 +421,11 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
               />
             </div>
             <div>
-              <label className="text-[11px] uppercase tracking-wider text-stone-400">Code</label>
+              <label htmlFor="piece-code" className="text-[11px] uppercase tracking-wider text-stone-400">
+                Code
+              </label>
               <input
+                id="piece-code"
                 type="text"
                 maxLength={2}
                 value={draft.shortCode}
@@ -342,8 +436,11 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
           </div>
 
           <div>
-            <label className="text-[11px] uppercase tracking-wider text-stone-400">Description</label>
+            <label htmlFor="piece-desc" className="text-[11px] uppercase tracking-wider text-stone-400">
+              Description
+            </label>
             <textarea
+              id="piece-desc"
               rows={2}
               value={draft.description}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
@@ -351,16 +448,19 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
             />
           </div>
 
-          {/* Special Piece Rules */}
-          <div className="space-y-2 pt-1">
-            <div className="text-[11px] uppercase tracking-wider text-stone-400">Special Piece Rules</div>
+          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
             {(
               [
                 ['royal', 'Royal (Checkable)', 'Must be defended from check and checkmate.'],
+                ['castleKing', 'Castling King', 'Can castle with an unmoved Castling Rook.'],
+                ['castleRook', 'Castling Rook', 'Can partner with a Castling King to castle.'],
                 ['iron', 'Iron Armor', 'Cannot be captured except by a Blacksmith piece.'],
                 ['blacksmith', 'Blacksmith', 'Can shatter and capture Iron pieces.'],
                 ['rangedAttack', 'Ranged Attack', 'Captures enemies without moving onto their square.'],
+                ['explosive', 'Explosive Blast', 'Captures destroy adjacent non-Royal pieces in a 3×3 burst!'],
+                ['phasing', 'Phasing Slider', 'Sliding rays pass right through friendly pieces.'],
                 ['pawnDoubleStep', 'First Double-Step', 'May step 2 squares forward on its first move.'],
+                ['enPassant', 'En Passant', 'Can perform and be captured by En Passant.'],
               ] as const
             ).map(([key, label, hint]) => (
               <label
@@ -402,13 +502,12 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
                   }`}
                   title={item.label}
                 >
-                  <PieceIcon icon={item.id} color="white" />
+                  <PieceIcon icon={item.id} color="white" palette={piecePalette} />
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Save Buttons */}
           <div className="flex gap-2 pt-2">
             <button
               type="button"
@@ -436,7 +535,7 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
           </div>
           {savedNotice && (
             <div className="text-xs text-emerald-300 font-medium flex items-center gap-1.5">
-              <Hammer className="w-3.5 h-3.5" /> {savedNotice}
+              <Hammer className="w-3.5 h-3.5 shrink-0" /> {savedNotice}
             </div>
           )}
         </div>
