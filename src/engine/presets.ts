@@ -433,33 +433,35 @@ function buildIronGate(): BoardDefinition {
 
 function buildCrumblingBridge(): BoardDefinition {
   const { tiles, pieces } = createEmptyGrid(7, 7);
-  // Carve a 1-row central river chasm across row 3 with 3 Fallow bridges (3 uses each).
-  // Because the chasm is 1 row wide, Knights and Wizards can always leap across even if all 3 bridges collapse!
+  // Central 1-row chasm with a permanent stone causeway at c=3 and two crumbling Fallow flank bridges (3 crossings each).
   for (let c = 0; c < 7; c++) {
-    if (c === 1 || c === 3 || c === 5) {
+    if (c === 1 || c === 5) {
       tiles[3][c] = { rule: 'fallow', fallowUses: 3 };
+    } else if (c === 3) {
+      tiles[3][c] = { rule: 'boost' };
     } else {
       tiles[3][c] = { rule: 'void' };
     }
   }
   addStandardPromotions(tiles);
-  const back = ['rook', 'knight', 'wizard', 'king', 'gryphon', 'knight', 'rook'];
+  const whiteBack = ['rook', 'knight', 'gryphon', 'king', 'queen', 'knight', 'rook'];
+  const blackBack = ['rook', 'knight', 'spearman', 'king', 'gryphon', 'knight', 'rook'];
   for (let c = 0; c < 7; c++) {
-    pieces[0][c] = makePiece(back[c], 'black');
+    pieces[0][c] = makePiece(blackBack[c], 'black');
     pieces[1][c] = makePiece('pawn', 'black');
     pieces[5][c] = makePiece('pawn', 'white');
-    pieces[6][c] = makePiece(back[c], 'white');
+    pieces[6][c] = makePiece(whiteBack[c], 'white');
   }
   return {
     id: 'crumbling-bridge',
     name: 'Crumbling Bridges',
-    description: 'Three Fallow bridges span a 1-row chasm (3 crossings each). Rush your sliders across — Knights and Wizards can always leap the gap!',
+    description: 'Two Fallow flank bridges crumble after 3 crossings while a central Boost causeway stays open. Lead your Queen and Knights across!',
     rows: 7,
     cols: 7,
     tiles,
     initialPieces: pieces,
     theme: 'sandstone',
-    difficulty: 2,
+    difficulty: 1,
     isBuiltin: true,
   };
 }
@@ -747,9 +749,9 @@ export const ADVENTURE_NODES: AdventureNode[] = [
     islandIndex: 1,
     order: 5,
     title: 'Crumbling Bridges',
-    subtitle: 'Fallow Chasm Tiles',
+    subtitle: 'Fallow & Boost Causeway',
     boardId: 'crumbling-bridge',
-    aiDifficulty: 'tactician',
+    aiDifficulty: 'novice',
     rewardXp: 260,
     rewardGems: 40,
     mapX: 430,

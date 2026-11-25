@@ -559,10 +559,17 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
               [
                 ['Normal Tile', { rule: 'normal' }],
                 ['Void Chasm', { rule: 'void' }],
+                ['🧱 Stone Wall', { rule: 'wall' }],
                 ['🛡 Sanctuary', { rule: 'sanctuary' }],
+                ['❄ Ice Slide', { rule: 'ice' }],
+                ['⚠ Spike Trap', { rule: 'trap' }],
+                ['⚡ Power Boost', { rule: 'boost' }],
+                ['♛ Crown Summit', { rule: 'summit' }],
                 ['# Fallow (2x)', { rule: 'fallow', fallowUses: 2 }],
+                ['# Fallow (3x)', { rule: 'fallow', fallowUses: 3 }],
+                ['★ Promo (White)', { rule: 'promotion', promotionFor: 'white' }],
+                ['★ Promo (Black)', { rule: 'promotion', promotionFor: 'black' }],
                 ['★ Promo (Both)', { rule: 'promotion', promotionFor: 'both' }],
-                ['★ Promo (W)', { rule: 'promotion', promotionFor: 'white' }],
                 ['◎ Portal A', { rule: 'portal', portalChannel: 'A' as PortalChannel }],
                 ['◎ Portal B', { rule: 'portal', portalChannel: 'B' as PortalChannel }],
                 ['◎ Portal C', { rule: 'portal', portalChannel: 'C' as PortalChannel }],
@@ -572,7 +579,8 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                 tool.kind === 'tile' &&
                 tool.tile.rule === tileCfg.rule &&
                 tool.tile.portalChannel === tileCfg.portalChannel &&
-                tool.tile.promotionFor === tileCfg.promotionFor;
+                tool.tile.promotionFor === tileCfg.promotionFor &&
+                tool.tile.fallowUses === tileCfg.fallowUses;
               return (
                 <button
                   key={label}
@@ -647,7 +655,13 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                   }`}
                 >
                   <span className="w-7 h-7">
-                    <PieceIcon icon={p.icon} color={paintColor} rules={p.rules} palette={piecePalette} />
+                    <PieceIcon
+                      icon={p.icon}
+                      color={paintColor}
+                      rules={p.rules}
+                      palette={piecePalette}
+                      customAppearance={p.customAppearance}
+                    />
                   </span>
                   <span className="text-[10px] truncate w-full text-center mt-0.5">{p.name}</span>
                 </button>

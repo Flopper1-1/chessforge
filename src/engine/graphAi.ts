@@ -52,7 +52,7 @@ export function analyzeBoardGraph(
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const t = tiles[r][c];
-      if (t.rule !== 'void') activeTileCount++;
+      if (t.rule !== 'void' && t.rule !== 'wall') activeTileCount++;
       if (t.rule === 'sanctuary') sanctuaryCount++;
       if (t.rule === 'portal' && t.portalChannel) {
         if (!portalMap[t.portalChannel]) portalMap[t.portalChannel] = [];
@@ -267,17 +267,17 @@ function buildPieceGraph(
       const advance = color === 'white' ? (rows - 1 - r) / Math.max(1, rows - 1) : r / Math.max(1, rows - 1);
       const sanctuaryBonus = t.rule === 'sanctuary' ? 0.35 : 0;
       const portalBonus = t.rule === 'portal' ? 0.12 : 0;
-      const fallowPenalty = t.rule === 'fallow' ? -0.1 : 0;
+      const boostBonus = t.rule === 'boost' ? 0.18 : 0;
+      const summitBonus = t.rule === 'summit' && def.rules.royal ? 0.6 : 0;
+      const hazardPenalty = t.rule === 'fallow' ? -0.1 : t.rule === 'trap' && !def.rules.royal && !def.rules.iron ? -0.45 : 0;
 
       let score: number;
       if (def.rules.royal) {
-        // Royals prefer Sanctuaries and moderate shelter over reckless exposure
-        score = 0.35 * (1 - advance * 0.5) + 0.35 * centrality + sanctuaryBonus * 1.4 + fallowPenalty;
+        score = 0.35 * (1 - advance * 0.5) + 0.35 * centrality + sanctuaryBonus * 1.4 + summitBonus + hazardPenalty;
       } else if (def.rules.pawnDoubleStep || (def.hops.length > 0 && Object.keys(def.slides).length === 0 && promoGoals.length > 0)) {
-        // Pawn-like / advancing pieces weight promotion BFS heavily
-        score = 0.3 * centrality + 0.5 * promoScore + 0.2 * advance + sanctuaryBonus + portalBonus + fallowPenalty;
+        score = 0.3 * centrality + 0.5 * promoScore + 0.2 * advance + sanctuaryBonus + portalBonus + boostBonus + hazardPenalty;
       } else {
-        score = 0.62 * centrality + 0.18 * promoScore + 0.12 * advance + sanctuaryBonus + portalBonus + fallowPenalty;
+        score = 0.62 * centrality + 0.18 * promoScore + 0.12 * advance + sanctuaryBonus + portalBonus + boostBonus + hazardPenalty;
       }
 
       pst[r][c] = Math.max(0.02, Math.min(1, Number(score.toFixed(3))));

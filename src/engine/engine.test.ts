@@ -266,4 +266,30 @@ describe('ChessForge Variant Engine', () => {
     const leapAcross = moves.find((m) => m.from.r === 4 && m.from.c === 2 && m.to.r === 2);
     expect(leapAcross).toBeDefined();
   });
+
+  it('supports new special tiles (Ice slide, Spike Trap, Power Boost, Crown Summit) and custom hop modes', () => {
+    const b = emptyBoard(6, 6);
+    b.tiles[3][2] = { rule: 'ice' };
+    b.tiles[3][4] = { rule: 'trap' };
+    b.tiles[1][0] = { rule: 'summit' };
+    b.initialPieces[5][0] = makePiece('king', 'white');
+    b.initialPieces[0][5] = makePiece('king', 'black');
+    b.initialPieces[4][2] = makePiece('rook', 'white');
+    b.initialPieces[4][4] = makePiece('rook', 'white');
+
+    const state = createInitialGameState(b, registry);
+    const moves = generateLegalMoves(state.tiles, state.grid, 'white', registry, getBoardRules(b));
+
+    // Ice tile at (3,2) slides rook from (4,2) -> (3,2) -> (2,2)
+    const iceMove = moves.find((m) => m.from.r === 4 && m.from.c === 2 && m.to.r === 3 && m.to.c === 2)!;
+    expect(iceMove.portalExit).toEqual({ r: 2, c: 2 });
+    const afterIce = makeGameMove(state, iceMove, registry);
+    expect(afterIce.grid[2][2]?.pieceId).toBe('rook');
+
+    // Spike Trap at (3,4) destroys arriving rook and disarms to normal
+    const trapMove = moves.find((m) => m.from.r === 4 && m.from.c === 4 && m.to.r === 3 && m.to.c === 4)!;
+    const afterTrap = makeGameMove(state, trapMove, registry);
+    expect(afterTrap.grid[3][4]).toBeNull();
+    expect(afterTrap.tiles[3][4].rule).toBe('normal');
+  });
 });

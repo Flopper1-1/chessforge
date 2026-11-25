@@ -13,6 +13,7 @@ import {
   AdventureNode,
   AdventureProgress,
   BoardDefinition,
+  BoardFrameStyle,
   BoardTheme,
   PieceDefinition,
   PiecePalette,
@@ -313,6 +314,64 @@ export default function App() {
                   </option>
                 ))}
               </select>
+              {uiPrefs.boardThemeOverride === 'custom' && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <label className="text-[11px] text-stone-300 flex items-center justify-between bg-[#18120d] px-2.5 py-1.5 rounded-lg border border-amber-500/20">
+                    Light Tile
+                    <input
+                      type="color"
+                      value={uiPrefs.customLightSquare}
+                      onChange={(e) => updatePrefs({ customLightSquare: e.target.value })}
+                      className="w-7 h-6 rounded bg-transparent cursor-pointer"
+                    />
+                  </label>
+                  <label className="text-[11px] text-stone-300 flex items-center justify-between bg-[#18120d] px-2.5 py-1.5 rounded-lg border border-amber-500/20">
+                    Dark Tile
+                    <input
+                      type="color"
+                      value={uiPrefs.customDarkSquare}
+                      onChange={(e) => updatePrefs({ customDarkSquare: e.target.value })}
+                      className="w-7 h-6 rounded bg-transparent cursor-pointer"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="pref-frame" className="text-xs font-semibold text-stone-300">
+                  Board Frame
+                </label>
+                <select
+                  id="pref-frame"
+                  value={uiPrefs.boardFrame}
+                  onChange={(e) => updatePrefs({ boardFrame: e.target.value as BoardFrameStyle })}
+                  className="w-full rounded-lg bg-[#16110d] border border-amber-500/30 px-2.5 py-1.5 text-xs text-amber-50"
+                >
+                  <option value="walnut">Carved Walnut</option>
+                  <option value="gold">Gilded Gold</option>
+                  <option value="steel">Obsidian Steel</option>
+                  <option value="minimal">Minimal Clean</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="pref-scale" className="text-xs font-semibold text-stone-300">
+                  Piece Size
+                </label>
+                <select
+                  id="pref-scale"
+                  value={uiPrefs.pieceScale}
+                  onChange={(e) =>
+                    updatePrefs({ pieceScale: e.target.value as 'compact' | 'normal' | 'large' })
+                  }
+                  className="w-full rounded-lg bg-[#16110d] border border-amber-500/30 px-2.5 py-1.5 text-xs text-amber-50"
+                >
+                  <option value="compact">Compact</option>
+                  <option value="normal">Normal</option>
+                  <option value="large">Large</option>
+                </select>
+              </div>
             </div>
 
             <div className="space-y-2">

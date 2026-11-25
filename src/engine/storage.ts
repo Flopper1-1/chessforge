@@ -9,7 +9,11 @@ const KEYS = {
 
 export const DEFAULT_UI_PREFS: UIPreferences = {
   boardThemeOverride: 'board_default',
+  customLightSquare: '#e8d5b5',
+  customDarkSquare: '#9e7248',
+  boardFrame: 'walnut',
   piecePalette: 'ivory',
+  pieceScale: 'normal',
   showCoordinates: true,
   showLegalMoves: true,
   showLastMove: true,

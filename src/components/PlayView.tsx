@@ -595,7 +595,11 @@ export const PlayView: React.FC<PlayViewProps> = ({
             grid={gameState.grid}
             registry={registry}
             theme={effectiveTheme}
+            customLightSquare={uiPrefs.customLightSquare}
+            customDarkSquare={uiPrefs.customDarkSquare}
+            boardFrame={uiPrefs.boardFrame}
             piecePalette={uiPrefs.piecePalette}
+            pieceScale={uiPrefs.pieceScale}
             selected={selected}
             legalMoves={selectedLegalMoves}
             lastMove={lastMove}
@@ -784,11 +788,16 @@ export const PlayView: React.FC<PlayViewProps> = ({
                   Move &amp; Tile Symbols
                 </div>
                 <ul className="space-y-1.5 text-[11px] leading-relaxed">
-                  <li><strong className="text-amber-200">⇄ Castling:</strong> Move an unmoved King 2 squares toward an unmoved Rook.</li>
+                  <li><strong className="text-amber-200">⇄ Castling / Swap:</strong> Castle an unmoved King &amp; Rook, or swap with an ally (cyan).</li>
                   <li><strong className="text-rose-300">EP En Passant:</strong> Capture a pawn that just double-stepped beside yours.</li>
                   <li><strong className="text-amber-300">★ Promotion:</strong> Reach this tile to choose a new piece to promote into.</li>
                   <li><strong className="text-amber-200">🛡 Sanctuary:</strong> Pieces standing here cannot be captured.</li>
                   <li><strong className="text-sky-300">◎ Portal A/B/C:</strong> Warps arriving pieces to the matching portal tile.</li>
+                  <li><strong className="text-cyan-300">❄ Ice Slide:</strong> Pieces landing here glide 1 extra square forward.</li>
+                  <li><strong className="text-rose-400">⚠ Spike Trap:</strong> One-time hazard that destroys a non-Royal/non-Iron intruder.</li>
+                  <li><strong className="text-emerald-300">⚡ Power Boost:</strong> Grants +1 orthogonal step while standing on this rune.</li>
+                  <li><strong className="text-yellow-300">♛ Crown Summit:</strong> Reaching this tile with a Royal wins immediately!</li>
+                  <li><strong className="text-stone-300">🧱 Stone Wall:</strong> Blocks sliding pieces; leapers can jump over it.</li>
                   <li><strong className="text-orange-300"># Fallow Tile:</strong> Crumbles into Void after its counter hits 0.</li>
                 </ul>
               </div>

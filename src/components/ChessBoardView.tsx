@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  BoardFrameStyle,
   BoardTheme,
   Coord,
   Move,
@@ -17,7 +18,11 @@ interface ChessBoardViewProps {
   grid: (PlacedPiece | null)[][];
   registry: PieceRegistry;
   theme?: BoardTheme;
+  customLightSquare?: string;
+  customDarkSquare?: string;
+  boardFrame?: BoardFrameStyle;
   piecePalette?: PiecePalette;
+  pieceScale?: 'compact' | 'normal' | 'large';
   selected?: Coord | null;
   legalMoves?: Move[];
   lastMove?: Move | null;
@@ -43,6 +48,14 @@ export const BOARD_THEME_COLORS: Record<
   sandstone: { label: 'Sandstone Oasis', light: '#ecd8b1', dark: '#b37a45' },
   crimson: { label: 'Royal Crimson', light: '#f0d5d5', dark: '#8c3b46' },
   frost: { label: 'Frost Marble', light: '#e2eef8', dark: '#5b7fa6' },
+  custom: { label: 'Custom Colors', light: '#e8d5b5', dark: '#9e7248' },
+};
+
+const FRAME_CLASSES: Record<BoardFrameStyle, string> = {
+  walnut: 'wood-frame',
+  gold: 'bg-gradient-to-br from-amber-600 via-yellow-700 to-amber-900 border-[3px] border-amber-300/70 shadow-2xl',
+  steel: 'bg-gradient-to-br from-slate-700 via-slate-800 to-slate-950 border-[3px] border-slate-500/60 shadow-2xl',
+  minimal: 'bg-[#1a1612] border border-amber-500/25 shadow-xl',
 };
 
 export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
@@ -52,7 +65,11 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
   grid,
   registry,
   theme = 'classic',
+  customLightSquare = '#e8d5b5',
+  customDarkSquare = '#9e7248',
+  boardFrame = 'walnut',
   piecePalette = 'ivory',
+  pieceScale = 'normal',
   selected,
   legalMoves = [],
   lastMove,
@@ -65,7 +82,12 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
   interactive = true,
   compact = false,
 }) => {
-  const palette = BOARD_THEME_COLORS[theme] ?? BOARD_THEME_COLORS.classic;
+  const palette =
+    theme === 'custom'
+      ? { label: 'Custom', light: customLightSquare, dark: customDarkSquare }
+      : BOARD_THEME_COLORS[theme] ?? BOARD_THEME_COLORS.classic;
+  const pieceSizeClass =
+    pieceScale === 'compact' ? 'w-[72%] h-[72%]' : pieceScale === 'large' ? 'w-[92%] h-[92%]' : 'w-[84%] h-[84%]';
 
   const rowOrder = Array.from({ length: rows }, (_, i) => (flipped ? rows - 1 - i : i));
   const colOrder = Array.from({ length: cols }, (_, i) => (flipped ? cols - 1 - i : i));
@@ -83,7 +105,7 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
 
   return (
     <div
-      className={`wood-frame rounded-xl ${compact ? 'p-1.5' : 'p-2.5 sm:p-3.5'} select-none mx-auto`}
+      className={`${FRAME_CLASSES[boardFrame] ?? FRAME_CLASSES.walnut} rounded-xl ${compact ? 'p-1.5' : 'p-2.5 sm:p-3.5'} select-none mx-auto`}
       style={{
         width: '100%',
         maxWidth: `${maxBoardPx}px`,
@@ -125,6 +147,23 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                   }`}
                   title={interactive ? `Void chasm (${String.fromCharCode(97 + c)}${rows - r})` : undefined}
                 />
+              );
+            }
+
+            if (tile.rule === 'wall') {
+              return (
+                <button
+                  key={`${r}-${c}`}
+                  type="button"
+                  disabled={!interactive}
+                  onClick={() => interactive && onSquareClick?.(r, c)}
+                  className={`relative aspect-square bg-gradient-to-br from-stone-600 to-stone-800 border-2 border-stone-500/80 shadow-inner flex items-center justify-center ${
+                    interactive ? 'cursor-pointer hover:brightness-110' : 'cursor-default'
+                  }`}
+                  title="Stone Wall (Blocks sliding pieces; leapers can jump over)"
+                >
+                  {!compact && <span className="text-xs opacity-75">🧱</span>}
+                </button>
               );
             }
 
@@ -201,6 +240,46 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                   </div>
                 )}
 
+                {tile.rule === 'ice' && (
+                  <div className="absolute inset-0.5 border border-cyan-300/80 bg-cyan-300/25 pointer-events-none flex items-start justify-end p-0.5">
+                    {!compact && (
+                      <span className="text-[9px] leading-none font-bold text-cyan-950 bg-cyan-200/90 px-1 rounded">
+                        ❄
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {tile.rule === 'trap' && (
+                  <div className="absolute inset-0.5 border border-rose-500/80 bg-rose-600/20 pointer-events-none flex items-start justify-end p-0.5">
+                    {!compact && (
+                      <span className="text-[9px] leading-none font-bold text-white bg-rose-700/90 px-1 rounded">
+                        ⚠
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {tile.rule === 'boost' && (
+                  <div className="absolute inset-0.5 border-2 border-emerald-400/80 bg-emerald-400/20 pointer-events-none flex items-start justify-end p-0.5">
+                    {!compact && (
+                      <span className="text-[9px] leading-none font-bold text-emerald-950 bg-emerald-300/90 px-1 rounded">
+                        ⚡
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {tile.rule === 'summit' && (
+                  <div className="absolute inset-0.5 border-2 border-yellow-300 bg-yellow-400/30 pointer-events-none flex items-start justify-end p-0.5">
+                    {!compact && (
+                      <span className="text-[9px] leading-none font-bold text-yellow-950 bg-yellow-300 px-1 rounded">
+                        ♛
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Graph-Theory AI Heatmap Overlay */}
                 {heatVal !== undefined && heatVal > 0 && (
                   <div
@@ -221,12 +300,13 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
 
                 {/* Piece */}
                 {piece && pieceDef && (
-                  <div className="relative z-10 w-[84%] h-[84%] drop-shadow-[0_2px_3px_rgba(0,0,0,0.55)] transition-transform duration-150">
+                  <div className={`relative z-10 ${pieceSizeClass} drop-shadow-[0_2px_3px_rgba(0,0,0,0.55)] transition-transform duration-150`}>
                     <PieceIcon
                       icon={pieceDef.icon}
                       color={piece.color}
                       rules={pieceDef.rules}
                       palette={piecePalette}
+                      customAppearance={pieceDef.customAppearance}
                     />
                   </div>
                 )}
@@ -236,6 +316,10 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                   <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                     {targetMove.castling ? (
                       <div className="px-1.5 py-0.5 rounded-full bg-amber-400/95 text-stone-950 text-[10px] font-extrabold shadow-md border border-amber-100">
+                        ⇄
+                      </div>
+                    ) : targetMove.isSwap ? (
+                      <div className="px-1.5 py-0.5 rounded-full bg-cyan-400/95 text-stone-950 text-[10px] font-extrabold shadow-md border border-cyan-100">
                         ⇄
                       </div>
                     ) : targetMove.isRangedCapture ? (

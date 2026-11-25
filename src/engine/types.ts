@@ -13,7 +13,14 @@ export const DIRECTIONS_8: Record<Direction8, { dr: number; dc: number }> = {
   NW: { dr: -1, dc: -1 },
 };
 
-export type HopMode = 'both' | 'move' | 'capture';
+export type HopMode =
+  | 'both'
+  | 'move'
+  | 'capture'
+  | 'first_move'
+  | 'en_passant'
+  | 'ranged'
+  | 'swap';
 
 export interface HopOffset {
   /** Row delta from White's perspective (-1 = forward/up, +1 = backward/down). Flipped automatically for Black. */
@@ -47,6 +54,23 @@ export type PieceIconId =
   | 'hammer'
   | 'tower';
 
+export type PieceBaseStyle = 'none' | 'classic' | 'pedestal' | 'shield' | 'rings';
+export type PieceCrestStyle = 'none' | 'halo' | 'crown' | 'horns' | 'flame' | 'star';
+
+export interface CustomPieceAppearance {
+  mode: 'layered' | 'pixel';
+  /** Layered mode options */
+  base: PieceBaseStyle;
+  bodyIcon: PieceIconId;
+  crest: PieceCrestStyle;
+  /** Custom colors (used for accent/tint; White vs Black still clearly distinguishable via rim/base) */
+  primaryColor?: string;
+  accentColor?: string;
+  glowColor?: string;
+  /** Pixel painter mode: 9x9 grid of hex colors or empty string */
+  pixels?: string[][];
+}
+
 export interface PieceRules {
   /** Must be defended; can be put in check and checkmated. */
   royal?: boolean;
@@ -77,6 +101,8 @@ export interface PieceDefinition {
   name: string;
   shortCode: string;
   icon: PieceIconId;
+  /** Optional custom appearance forged in the Piece Appearance Creator. */
+  customAppearance?: CustomPieceAppearance;
   description: string;
   /** Relative hops in the 7x7 grid (dr, dc in -3..3) from White's perspective. */
   hops: HopOffset[];
@@ -91,10 +117,15 @@ export type PortalChannel = 'A' | 'B' | 'C';
 export type TileRuleType =
   | 'normal'
   | 'void'
+  | 'wall'
   | 'sanctuary'
   | 'portal'
   | 'promotion'
-  | 'fallow';
+  | 'fallow'
+  | 'ice'
+  | 'trap'
+  | 'boost'
+  | 'summit';
 
 export interface TileConfig {
   rule: TileRuleType;
@@ -114,7 +145,10 @@ export type BoardTheme =
   | 'obsidian'
   | 'sandstone'
   | 'crimson'
-  | 'frost';
+  | 'frost'
+  | 'custom';
+
+export type BoardFrameStyle = 'walnut' | 'gold' | 'steel' | 'minimal';
 
 export type PiecePalette = 'ivory' | 'royal_gold' | 'jade_ruby' | 'blueprint';
 
@@ -174,10 +208,14 @@ export interface Coord {
 export interface Move {
   from: Coord;
   to: Coord;
-  /** If a portal warps the piece after landing on `to`, this is its final square. */
+  /** If a portal or ice tile moves the piece after landing on `to`, this is its final square. */
   portalExit?: Coord;
+  /** True when landing on an Ice tile caused an extra slide. */
+  isIceSlide?: boolean;
   /** True when a Ranged Attack captures on `to` while the attacker stays on `from`. */
   isRangedCapture?: boolean;
+  /** True when swapping positions with a friendly piece. */
+  isSwap?: boolean;
   /** Castling partner rook movement */
   castling?: {
     rookFrom: Coord;
@@ -186,7 +224,7 @@ export interface Move {
   };
   /** En passant capture square (where the captured pawn actually sits) */
   enPassantCaptureCoord?: Coord;
-  /** True when a pawn performed a 2-step double push (sets enPassantTarget on next state) */
+  /** True when a pawn/piece performed a first-move double push (sets enPassantTarget on next state) */
   isDoubleStep?: boolean;
   captured?: PlacedPiece;
   promotedTo?: string;
@@ -206,7 +244,7 @@ export type GameStatus =
 
 export interface GameState {
   boardDef: BoardDefinition;
-  /** Live mutable-cloned tiles (fallow tiles decrement and crumble to void). */
+  /** Live mutable-cloned tiles (fallow tiles decrement and crumble to void; traps disarm). */
   tiles: TileConfig[][];
   /** Live pieces [r][c] */
   grid: (PlacedPiece | null)[][];
@@ -272,7 +310,11 @@ export interface AdventureProgress {
 
 export interface UIPreferences {
   boardThemeOverride: BoardTheme | 'board_default';
+  customLightSquare: string;
+  customDarkSquare: string;
+  boardFrame: BoardFrameStyle;
   piecePalette: PiecePalette;
+  pieceScale: 'compact' | 'normal' | 'large';
   showCoordinates: boolean;
   showLegalMoves: boolean;
   showLastMove: boolean;

@@ -1,11 +1,18 @@
 import React from 'react';
-import { Color, PieceIconId, PiecePalette, PieceRules } from '../engine/types';
+import {
+  Color,
+  CustomPieceAppearance,
+  PieceIconId,
+  PiecePalette,
+  PieceRules,
+} from '../engine/types';
 
 interface PieceIconProps {
   icon: PieceIconId;
   color: Color;
   rules?: PieceRules;
   palette?: PiecePalette;
+  customAppearance?: CustomPieceAppearance;
   className?: string;
 }
 
@@ -62,16 +69,62 @@ export const PieceIcon: React.FC<PieceIconProps> = ({
   color,
   rules,
   palette = 'ivory',
+  customAppearance,
   className = 'w-full h-full',
 }) => {
   const isWhite = color === 'white';
   const scheme = (PALETTES[palette] ?? PALETTES.ivory)[color];
-  const fill = scheme.fill;
-  const stroke = scheme.stroke;
-  const accent = scheme.accent;
+  const fill =
+    customAppearance?.mode === 'layered' && customAppearance.primaryColor && isWhite
+      ? customAppearance.primaryColor
+      : scheme.fill;
+  const stroke =
+    customAppearance?.mode === 'layered' && customAppearance.primaryColor && !isWhite
+      ? customAppearance.primaryColor
+      : scheme.stroke;
+  const accent =
+    customAppearance?.mode === 'layered' && customAppearance.accentColor
+      ? customAppearance.accentColor
+      : scheme.accent;
+  const activeIcon =
+    customAppearance?.mode === 'layered' ? customAppearance.bodyIcon : icon;
+
+  if (customAppearance?.mode === 'pixel' && customAppearance.pixels) {
+    const px = customAppearance.pixels;
+    return (
+      <svg viewBox="0 0 44 44" className={className} aria-hidden="true">
+        {/* Team badge backing so White vs Black is always crystal clear */}
+        <rect
+          x="3"
+          y="3"
+          width="38"
+          height="38"
+          rx="8"
+          fill={isWhite ? '#f8f1df' : '#1e1a18'}
+          stroke={isWhite ? '#3a2a19' : '#e6c580'}
+          strokeWidth="2.4"
+        />
+        {px.map((row, r) =>
+          row.map((hex, c) =>
+            hex ? (
+              <rect
+                key={`${r}-${c}`}
+                x={6.5 + c * 3.45}
+                y={6.5 + r * 3.45}
+                width="3.6"
+                height="3.6"
+                rx="0.5"
+                fill={hex}
+              />
+            ) : null
+          )
+        )}
+      </svg>
+    );
+  }
 
   const renderShape = () => {
-    switch (icon) {
+    switch (activeIcon) {
       case 'king':
         return (
           <>
@@ -245,8 +298,79 @@ export const PieceIcon: React.FC<PieceIconProps> = ({
     }
   };
 
+  const renderLayeredBase = () => {
+    if (customAppearance?.mode !== 'layered') return null;
+    switch (customAppearance.base) {
+      case 'pedestal':
+        return (
+          <path d="M8 36h28l-3 5H11l-3-5z" fill={accent} stroke={stroke} strokeWidth="1.6" />
+        );
+      case 'shield':
+        return (
+          <path
+            d="M22 4l15 5v11c0 9-6.5 15-15 19C13.5 35 7 29 7 20V9l15-5z"
+            fill={isWhite ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.35)'}
+            stroke={accent}
+            strokeWidth="1.8"
+          />
+        );
+      case 'rings':
+        return (
+          <circle
+            cx="22"
+            cy="22"
+            r="19"
+            fill="none"
+            stroke={accent}
+            strokeWidth="2"
+            opacity="0.8"
+          />
+        );
+      case 'classic':
+        return (
+          <ellipse cx="22" cy="38.5" rx="13" ry="2.6" fill={accent} opacity="0.65" />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderLayeredCrest = () => {
+    if (customAppearance?.mode !== 'layered') return null;
+    switch (customAppearance.crest) {
+      case 'halo':
+        return (
+          <ellipse cx="22" cy="5.5" rx="8.5" ry="2.2" fill="none" stroke={accent} strokeWidth="2" />
+        );
+      case 'crown':
+        return (
+          <path d="M15 9l2-5 5 3 5-3 2 5H15z" fill={accent} stroke={stroke} strokeWidth="1.2" />
+        );
+      case 'horns':
+        return (
+          <>
+            <path d="M13 11c-3-4-2-7 1-8-1 3 0 5 2 7" fill={accent} stroke={stroke} strokeWidth="1.2" />
+            <path d="M31 11c3-4 2-7-1-8 1 3 0 5-2 7" fill={accent} stroke={stroke} strokeWidth="1.2" />
+          </>
+        );
+      case 'flame':
+        return (
+          <path d="M22 2c3 3 5 5.5 3.5 8.5-1 1.5-6 1.5-7 0C17 7.5 19 5 22 2z" fill={accent} stroke={stroke} strokeWidth="1.2" />
+        );
+      case 'star':
+        return (
+          <path d="M22 2l1.4 3.2 3.4.3-2.6 2.2.8 3.3-3-1.8-3 1.8.8-3.3-2.6-2.2 3.4-.3L22 2z" fill={accent} />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <svg viewBox="0 0 44 44" className={className} aria-hidden="true">
+      {customAppearance?.mode === 'layered' && customAppearance.glowColor && (
+        <circle cx="22" cy="22" r="19" fill={customAppearance.glowColor} opacity="0.22" />
+      )}
       {rules?.iron && (
         <circle
           cx="22"
@@ -259,7 +383,9 @@ export const PieceIcon: React.FC<PieceIconProps> = ({
           opacity="0.85"
         />
       )}
+      {renderLayeredBase()}
       {renderShape()}
+      {renderLayeredCrest()}
     </svg>
   );
 };

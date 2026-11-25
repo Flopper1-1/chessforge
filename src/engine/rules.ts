@@ -223,6 +223,10 @@ export function isSquareAttackedBy(
   return false;
 }
 
+function isImpassableTile(tile: TileConfig): boolean {
+  return tile.rule === 'void' || tile.rule === 'wall';
+}
+
 function isAttackingSquare(
   def: PieceDefinition,
   color: Color,
@@ -232,13 +236,11 @@ function isAttackingSquare(
   const dirSign = color === 'white' ? 1 : -1;
   const dr = to.r - from.r;
   const dc = to.c - from.c;
-  // Check hops
   for (const h of def.hops) {
     if (h.dr * dirSign === dr && h.dc === dc) {
-      return h.mode === 'both' || h.mode === 'capture';
+      return h.mode === 'both' || h.mode === 'capture' || h.mode === 'ranged';
     }
   }
-  // Slides always capture
   return true;
 }
 
@@ -314,24 +316,49 @@ export function generatePseudoMovesForSquare(
     tc: number,
     allowMove: boolean,
     allowCapture: boolean,
-    isDoubleStep = false
+    isDoubleStep = false,
+    forceRanged = false
   ) => {
     if (tr < 0 || tr >= rows || tc < 0 || tc >= cols) return 'oob';
     const targetTile = tiles[tr][tc];
-    if (targetTile.rule === 'void') return 'void';
+    if (isImpassableTile(targetTile)) return 'void';
+
+    const computePostLanding = (landR: number, landC: number): { exit?: Coord; isIce?: boolean } => {
+      const lt = tiles[landR][landC];
+      if (lt.rule === 'portal' && lt.portalChannel) {
+        const exit = findPortalExit(tiles, grid, { r: landR, c: landC }, lt.portalChannel);
+        return { exit };
+      }
+      if (lt.rule === 'ice') {
+        const sr = Math.sign(landR - r);
+        const sc = Math.sign(landC - c);
+        const nr = landR + sr;
+        const nc = landC + sc;
+        if (
+          (sr !== 0 || sc !== 0) &&
+          nr >= 0 &&
+          nr < rows &&
+          nc >= 0 &&
+          nc < cols &&
+          !isImpassableTile(tiles[nr][nc]) &&
+          !grid[nr][nc]
+        ) {
+          return { exit: { r: nr, c: nc }, isIce: true };
+        }
+      }
+      return {};
+    };
 
     const occupant = grid[tr][tc];
     if (!occupant) {
       if (allowMove) {
-        let portalExit: Coord | undefined;
-        if (targetTile.rule === 'portal' && targetTile.portalChannel) {
-          portalExit = findPortalExit(tiles, grid, { r: tr, c: tc }, targetTile.portalChannel);
-        }
+        const post = computePostLanding(tr, tc);
         pushMoveWithPromotions(
           {
             from: { r, c },
             to: { r: tr, c: tc },
-            portalExit,
+            portalExit: post.exit,
+            isIceSlide: post.isIce,
             isDoubleStep,
           },
           false,
@@ -349,16 +376,14 @@ export function generatePseudoMovesForSquare(
     if (allowCapture) {
       const targetDef = registry[occupant.pieceId];
       if (targetDef && canCaptureTarget(def, occupant, targetDef, targetTile)) {
-        const isRanged = Boolean(def.rules.rangedAttack);
-        let portalExit: Coord | undefined;
-        if (!isRanged && targetTile.rule === 'portal' && targetTile.portalChannel) {
-          portalExit = findPortalExit(tiles, grid, { r: tr, c: tc }, targetTile.portalChannel);
-        }
+        const isRanged = forceRanged || Boolean(def.rules.rangedAttack);
+        const post = isRanged ? {} : computePostLanding(tr, tc);
         pushMoveWithPromotions(
           {
             from: { r, c },
             to: { r: tr, c: tc },
-            portalExit,
+            portalExit: post.exit,
+            isIceSlide: post.isIce,
             isRangedCapture: isRanged,
             captured: occupant,
           },
@@ -370,16 +395,77 @@ export function generatePseudoMovesForSquare(
     return 'enemy';
   };
 
-  // 1. Hops (7x7 relative offsets, can jump over anything including void)
+  // 1. Hops (7x7 relative offsets, can jump over anything including void/walls)
   for (const hop of def.hops) {
     const tr = r + hop.dr * dirSign;
     const tc = c + hop.dc;
-    tryAddMove(
-      tr,
-      tc,
-      hop.mode === 'both' || hop.mode === 'move',
-      hop.mode === 'both' || hop.mode === 'capture'
-    );
+    if (hop.mode === 'first_move') {
+      if (!piece.hasMoved) {
+        tryAddMove(tr, tc, true, false, Math.abs(hop.dr) >= 2);
+      }
+    } else if (hop.mode === 'en_passant') {
+      if (
+        rules.enPassantEnabled &&
+        enPassantTarget &&
+        enPassantTarget.pawnColor !== piece.color &&
+        enPassantTarget.targetSquare.r === tr &&
+        enPassantTarget.targetSquare.c === tc &&
+        tr >= 0 &&
+        tr < rows &&
+        tc >= 0 &&
+        tc < cols &&
+        !isImpassableTile(tiles[tr][tc]) &&
+        !grid[tr][tc]
+      ) {
+        const epPawn = grid[enPassantTarget.pawnSquare.r]?.[enPassantTarget.pawnSquare.c];
+        const epTile = tiles[enPassantTarget.pawnSquare.r]?.[enPassantTarget.pawnSquare.c];
+        const targetDef = epPawn ? registry[epPawn.pieceId] : undefined;
+        if (epPawn && epTile && targetDef && canCaptureTarget(def, epPawn, targetDef, epTile)) {
+          pushMoveWithPromotions(
+            {
+              from: { r, c },
+              to: { r: tr, c: tc },
+              enPassantCaptureCoord: enPassantTarget.pawnSquare,
+              captured: epPawn,
+            },
+            true,
+            false
+          );
+        }
+      }
+    } else if (hop.mode === 'ranged') {
+      tryAddMove(tr, tc, false, true, false, true);
+    } else if (hop.mode === 'swap') {
+      if (tr >= 0 && tr < rows && tc >= 0 && tc < cols && !isImpassableTile(tiles[tr][tc])) {
+        const ally = grid[tr][tc];
+        if (ally && ally.color === piece.color && !registry[ally.pieceId]?.rules.royal) {
+          moves.push({
+            from: { r, c },
+            to: { r: tr, c: tc },
+            isSwap: true,
+            notation: `${def.shortCode}${coordToAlgebraic(r, c, rows)}⇄${coordToAlgebraic(tr, tc, rows)}`,
+          });
+        }
+      }
+    } else {
+      tryAddMove(
+        tr,
+        tc,
+        hop.mode === 'both' || hop.mode === 'move',
+        hop.mode === 'both' || hop.mode === 'capture'
+      );
+    }
+  }
+
+  // 1b. Boost tile bonus: standing on a Boost rune grants +1 orthogonal step
+  if (tiles[r][c].rule === 'boost') {
+    for (const [bdr, bdc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const tr = r + bdr;
+      const tc = c + bdc;
+      if (!moves.some((m) => m.to.r === tr && m.to.c === tc)) {
+        tryAddMove(tr, tc, true, true);
+      }
+    }
   }
 
   // 2. Pawn-like first double step
@@ -391,9 +477,9 @@ export function generatePseudoMovesForSquare(
       step1r < rows &&
       step2r >= 0 &&
       step2r < rows &&
-      tiles[step1r][c].rule !== 'void' &&
+      !isImpassableTile(tiles[step1r][c]) &&
       !grid[step1r][c] &&
-      tiles[step2r][c].rule !== 'void' &&
+      !isImpassableTile(tiles[step2r][c]) &&
       !grid[step2r][c]
     ) {
       tryAddMove(step2r, c, true, false, true);
@@ -553,6 +639,13 @@ export function applyMoveToBoard(
     return { tiles: nextTiles, grid: nextGrid, blastCaptures };
   }
 
+  if (move.isSwap) {
+    const ally = nextGrid[move.to.r][move.to.c];
+    nextGrid[move.to.r][move.to.c] = { ...moving, hasMoved: true };
+    nextGrid[move.from.r][move.from.c] = ally ? { ...ally, hasMoved: true } : null;
+    return { tiles: nextTiles, grid: nextGrid, blastCaptures };
+  }
+
   if (move.isRangedCapture) {
     nextGrid[move.to.r][move.to.c] = null;
     moving.hasMoved = true;
@@ -567,11 +660,25 @@ export function applyMoveToBoard(
       hasMoved: true,
       pieceId: move.promotedTo ?? moving.pieceId,
     };
-    nextGrid[finalCoord.r][finalCoord.c] = updatedPiece;
+    const finalTile = nextTiles[finalCoord.r][finalCoord.c];
+    const movingDef = registry?.[updatedPiece.pieceId];
+
+    // Spike Trap tile: destroys arriving non-Royal, non-Iron piece and disarms to normal
+    if (finalTile.rule === 'trap') {
+      nextTiles[finalCoord.r][finalCoord.c] = { rule: 'normal' };
+      if (!movingDef?.rules.royal && !movingDef?.rules.iron) {
+        blastCaptures.push(updatedPiece);
+        nextGrid[finalCoord.r][finalCoord.c] = null;
+      } else {
+        nextGrid[finalCoord.r][finalCoord.c] = updatedPiece;
+      }
+    } else {
+      nextGrid[finalCoord.r][finalCoord.c] = updatedPiece;
+    }
 
     // Explosive / Atomic capture blast (destroys adjacent non-royal, non-sanctuary, non-iron pieces)
-    const movingDef = registry?.[moving.pieceId];
-    if (move.captured && movingDef?.rules.explosive && registry) {
+    const attackerDef = registry?.[moving.pieceId];
+    if (move.captured && attackerDef?.rules.explosive && registry) {
       const rows = nextTiles.length;
       const cols = nextTiles[0].length;
       for (let dr = -1; dr <= 1; dr++) {
@@ -719,17 +826,27 @@ export function evaluateGameStatus(state: GameState, registry: PieceRegistry): G
         turnHasRoyal = true;
       }
 
-      // King of the Hill win condition: Royal reaches a Sanctuary or exact center square
-      if (rules.winCondition === 'king_of_the_hill' && registry[p.pieceId]?.rules.royal) {
-        const isCenter =
-          Math.abs(r - (rows - 1) / 2) <= 0.6 && Math.abs(c - (cols - 1) / 2) <= 0.6;
-        if (tiles[r][c].rule === 'sanctuary' || isCenter) {
+      // Summit tile or King of the Hill win condition
+      if (registry[p.pieceId]?.rules.royal) {
+        if (tiles[r][c].rule === 'summit') {
           return {
             ...state,
             status: p.color === 'white' ? 'victory_white' : 'victory_black',
             winner: p.color,
-            statusReason: `King of the Hill! ${p.color === 'white' ? 'White' : 'Black'}'s Royal claimed the summit.`,
+            statusReason: `Summit Claimed! ${p.color === 'white' ? 'White' : 'Black'}'s Royal reached the Crown Summit.`,
           };
+        }
+        if (rules.winCondition === 'king_of_the_hill') {
+          const isCenter =
+            Math.abs(r - (rows - 1) / 2) <= 0.6 && Math.abs(c - (cols - 1) / 2) <= 0.6;
+          if (tiles[r][c].rule === 'sanctuary' || isCenter) {
+            return {
+              ...state,
+              status: p.color === 'white' ? 'victory_white' : 'victory_black',
+              winner: p.color,
+              statusReason: `King of the Hill! ${p.color === 'white' ? 'White' : 'Black'}'s Royal claimed the summit.`,
+            };
+          }
         }
       }
     }
