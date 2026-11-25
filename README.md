@@ -35,3 +35,5 @@ npm run build
 - **React 19** + **TypeScript** + **Vite** + **Tailwind CSS v4**
 - **Vitest** for unit testing the variant chess rules and Graph-Theory AI
 - **Web Audio API** for zero-dependency synthesized wooden board & fantasy sound effects
+
+THIS SKILL SUCKS!!!!
