@@ -16,16 +16,18 @@ import {
   BoardRuleSettings,
   BoardTheme,
   Color,
+  COLOR_LABELS,
   DEFAULT_BOARD_RULES,
   PieceDefinition,
   PiecePalette,
   PlacedPiece,
   PortalChannel,
+  PromotionRuleMode,
   TileConfig,
   WinCondition,
 } from '../engine/types';
 import { makePiece } from '../engine/presets';
-import { getBoardRules, PieceRegistry } from '../engine/rules';
+import { getBoardPlayers, getBoardRules, PieceRegistry } from '../engine/rules';
 import { BOARD_THEME_COLORS, ChessBoardView } from './ChessBoardView';
 import { PieceIcon } from './PieceIcon';
 
@@ -51,7 +53,13 @@ type LeftTab = 'setup' | 'rules';
 function cloneBoard(b: BoardDefinition): BoardDefinition {
   return {
     ...b,
-    rules: b.rules ? { ...b.rules, promotionPool: b.rules.promotionPool ? [...b.rules.promotionPool] : undefined } : undefined,
+    players: b.players ? [...b.players] : undefined,
+    rules: b.rules
+      ? {
+          ...b.rules,
+          promotionPool: b.rules.promotionPool ? [...b.rules.promotionPool] : undefined,
+        }
+      : undefined,
     tiles: b.tiles.map((row) => row.map((t) => ({ ...t }))),
     initialPieces: b.initialPieces.map((row) => row.map((p) => (p ? { ...p } : null))),
   };
@@ -76,6 +84,7 @@ function createBlankBoard(rows = 8, cols = 8): BoardDefinition {
     description: 'Hand-crafted custom chess variant.',
     rows,
     cols,
+    players: ['white', 'black'],
     tiles,
     initialPieces,
     theme: 'classic',
@@ -116,6 +125,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
   }, [initialBoard]);
 
   const activeRules: BoardRuleSettings = getBoardRules(draft);
+  const activePlayers = getBoardPlayers(draft);
 
   function pushDraft(next: BoardDefinition) {
     setUndoStack((prev) => [...prev.slice(-24), cloneBoard(draft)]);
@@ -136,12 +146,22 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
     });
   }
 
+  function setPlayerCount(count: 2 | 3 | 4) {
+    const players: Color[] =
+      count === 2
+        ? ['white', 'black']
+        : count === 3
+          ? ['white', 'red', 'black']
+          : ['white', 'red', 'black', 'blue'];
+    pushDraft({ ...cloneBoard(draft), players });
+  }
+
   function togglePromoPiece(pieceId: string) {
     const exists = activeRules.promotionPool.includes(pieceId);
     const nextPool = exists
       ? activeRules.promotionPool.filter((id) => id !== pieceId)
       : [...activeRules.promotionPool, pieceId];
-    if (nextPool.length === 0) return; // keep at least 1 promotion choice
+    if (nextPool.length === 0) return;
     updateRules({ promotionPool: nextPool });
   }
 
@@ -185,26 +205,35 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
       if (mr !== r && mc !== c) coords.push({ r: mr, c: mc, flipColor: true });
     }
 
+    const mirrorColor = (col: Color): Color => {
+      if (col === 'white') return 'black';
+      if (col === 'black') return 'white';
+      if (col === 'red') return 'blue';
+      return 'red';
+    };
+
     for (const pt of coords) {
       if (tool.kind === 'erasePiece') {
         next.initialPieces[pt.r][pt.c] = null;
       } else if (tool.kind === 'piece') {
-        if (next.tiles[pt.r][pt.c].rule === 'void') {
+        if (next.tiles[pt.r][pt.c].rule === 'void' || next.tiles[pt.r][pt.c].rule === 'wall') {
           next.tiles[pt.r][pt.c] = { rule: 'normal' };
         }
-        const col: Color = pt.flipColor
-          ? tool.color === 'white'
-            ? 'black'
-            : 'white'
-          : tool.color;
+        const col: Color = pt.flipColor ? mirrorColor(tool.color) : tool.color;
         next.initialPieces[pt.r][pt.c] = makePiece(tool.pieceId, col);
       } else if (tool.kind === 'tile') {
         const tileCopy: TileConfig = { ...tool.tile };
-        if (tileCopy.rule === 'promotion' && pt.flipColor && tileCopy.promotionFor !== 'both') {
-          tileCopy.promotionFor = tileCopy.promotionFor === 'white' ? 'black' : 'white';
+        if (
+          tileCopy.rule === 'promotion' &&
+          pt.flipColor &&
+          tileCopy.promotionFor &&
+          tileCopy.promotionFor !== 'both' &&
+          tileCopy.promotionFor !== 'all'
+        ) {
+          tileCopy.promotionFor = mirrorColor(tileCopy.promotionFor);
         }
         next.tiles[pt.r][pt.c] = tileCopy;
-        if (tileCopy.rule === 'void') {
+        if (tileCopy.rule === 'void' || tileCopy.rule === 'wall') {
           next.initialPieces[pt.r][pt.c] = null;
         }
       }
@@ -290,22 +319,29 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                 </div>
 
                 <div>
-                  <label htmlFor="bf-desc" className="text-[11px] uppercase text-stone-400">
-                    Description
-                  </label>
-                  <textarea
-                    id="bf-desc"
-                    rows={2}
-                    value={draft.description}
-                    onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-                    className="w-full mt-1 rounded-lg bg-[#16110d] border border-amber-500/25 px-3 py-1.5 text-xs text-stone-200"
-                  />
+                  <span className="text-[11px] uppercase text-stone-400">Players</span>
+                  <div className="grid grid-cols-3 gap-1.5 mt-1">
+                    {([2, 3, 4] as const).map((cnt) => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setPlayerCount(cnt)}
+                        className={`py-1.5 rounded text-xs font-semibold cursor-pointer ${
+                          activePlayers.length === cnt
+                            ? 'bg-amber-500/30 border border-amber-400 text-amber-100'
+                            : 'bg-[#18120d] border border-amber-500/15 text-stone-400'
+                        }`}
+                      >
+                        {cnt} Players
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label htmlFor="bf-rows" className="text-[11px] uppercase text-stone-400">
-                      Rows (4–16)
+                      Rows (4-16)
                     </label>
                     <input
                       id="bf-rows"
@@ -319,7 +355,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                   </div>
                   <div>
                     <label htmlFor="bf-cols" className="text-[11px] uppercase text-stone-400">
-                      Cols (4–16)
+                      Cols (4-16)
                     </label>
                     <input
                       id="bf-cols"
@@ -336,24 +372,26 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                 <div>
                   <span className="text-[11px] uppercase text-stone-400">Board Theme</span>
                   <div className="grid grid-cols-2 gap-1.5 mt-1">
-                    {(Object.keys(BOARD_THEME_COLORS) as BoardTheme[]).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setDraft({ ...draft, theme: t })}
-                        className={`py-1 px-2 rounded text-[11px] text-left flex items-center gap-1.5 cursor-pointer ${
-                          draft.theme === t
-                            ? 'bg-amber-500/30 border border-amber-400 text-amber-100'
-                            : 'bg-[#18120d] border border-amber-500/15 text-stone-400'
-                        }`}
-                      >
-                        <span
-                          className="w-3 h-3 rounded-sm shrink-0 border border-white/20"
-                          style={{ backgroundColor: BOARD_THEME_COLORS[t].dark }}
-                        />
-                        <span className="truncate">{BOARD_THEME_COLORS[t].label}</span>
-                      </button>
-                    ))}
+                    {(Object.keys(BOARD_THEME_COLORS) as BoardTheme[])
+                      .filter((t) => t !== 'custom')
+                      .map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setDraft({ ...draft, theme: t })}
+                          className={`py-1 px-2 rounded text-[11px] text-left flex items-center gap-1.5 cursor-pointer ${
+                            draft.theme === t
+                              ? 'bg-amber-500/30 border border-amber-400 text-amber-100'
+                              : 'bg-[#18120d] border border-amber-500/15 text-stone-400'
+                          }`}
+                        >
+                          <span
+                            className="w-3 h-3 rounded-sm shrink-0 border border-white/20"
+                            style={{ backgroundColor: BOARD_THEME_COLORS[t].dark }}
+                          />
+                          <span className="truncate">{BOARD_THEME_COLORS[t].label}</span>
+                        </button>
+                      ))}
                   </div>
                 </div>
 
@@ -385,7 +423,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                 </div>
               </>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
                 <div>
                   <label htmlFor="bf-win" className="text-[11px] uppercase text-stone-400">
                     Win Condition
@@ -397,17 +435,43 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                     className="w-full mt-1 rounded-lg bg-[#16110d] border border-amber-500/25 px-2.5 py-2 text-xs text-amber-50"
                   >
                     <option value="checkmate">Standard Checkmate</option>
-                    <option value="king_of_the_hill">King of the Hill (Reach Center/Sanctuary)</option>
+                    <option value="three_check">Three-Check (3 Checks Wins)</option>
+                    <option value="king_of_the_hill">King of the Hill (Center / Summit)</option>
+                    <option value="capture_the_king">Capture the King (No Check Rule)</option>
                     <option value="annihilation">Annihilation (Capture All Pieces)</option>
+                    <option value="antichess">Antichess (Lose All Pieces to Win)</option>
+                    <option value="race_to_promote">Promotion Race (First to Promote Wins)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="bf-promo-mode" className="text-[11px] uppercase text-stone-400">
+                    Promotion Rule
+                  </label>
+                  <select
+                    id="bf-promo-mode"
+                    value={activeRules.promotionMode}
+                    onChange={(e) =>
+                      updateRules({ promotionMode: e.target.value as PromotionRuleMode })
+                    }
+                    className="w-full mt-1 rounded-lg bg-[#16110d] border border-amber-500/25 px-2.5 py-2 text-xs text-amber-50"
+                  >
+                    <option value="player_choice">Player Choice (Selected Pool)</option>
+                    <option value="all_non_royal">Any Non-Royal Piece (Full Library)</option>
+                    <option value="captured_only">Captured Pieces Only (Revive Lost)</option>
+                    <option value="random_pool">Random Piece from Pool</option>
                   </select>
                 </div>
 
                 <div className="space-y-1.5">
-                  <span className="text-[11px] uppercase text-stone-400">Chess &amp; Draw Rules</span>
+                  <span className="text-[11px] uppercase text-stone-400">Gameplay &amp; Draw Rules</span>
                   {(
                     [
                       ['castlingEnabled', 'Enable Castling'],
                       ['enPassantEnabled', 'Enable En Passant'],
+                      ['mandatoryCapture', 'Forced Captures (Must Capture)'],
+                      ['promoteOnCapture', 'Promote on Capture'],
+                      ['friendlyFire', 'Friendly Fire (Capture Own Pieces)'],
                       ['drawByRepetition', 'Threefold Repetition Draw'],
                       ['drawByFiftyMove', '50-Move Rule Draw'],
                       ['drawByInsufficientMaterial', 'Insufficient Material Draw'],
@@ -415,7 +479,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                   ).map(([key, label]) => (
                     <label
                       key={key}
-                      className="flex items-center gap-2 p-2 rounded-lg bg-[#19130e] border border-amber-500/15 text-xs text-stone-200 cursor-pointer"
+                      className="flex items-center gap-2 p-1.5 rounded-lg bg-[#19130e] border border-amber-500/15 text-xs text-stone-200 cursor-pointer"
                     >
                       <input
                         type="checkbox"
@@ -430,9 +494,9 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
 
                 <div className="space-y-1.5">
                   <span className="text-[11px] uppercase text-stone-400">
-                    Promotion Choices ({activeRules.promotionPool.length} selected)
+                    Promotion Pool ({activeRules.promotionPool.length} selected)
                   </span>
-                  <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-2 gap-1 max-h-36 overflow-y-auto pr-1">
                     {pieces
                       .filter((p) => !p.rules.royal)
                       .map((p) => {
@@ -474,7 +538,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                 onClick={() => handleSave(true)}
                 className="flex-1 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-stone-950 font-bold text-xs flex items-center justify-center gap-1.5 hover:from-amber-400 hover:to-amber-500 cursor-pointer"
               >
-                <Play className="w-3.5 h-3.5 fill-current" /> Test vs AI
+                <Play className="w-3.5 h-3.5 fill-current" /> Test Play
               </button>
             </div>
             {savedNotice && <p className="text-xs text-emerald-300">{savedNotice}</p>}
@@ -497,7 +561,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                   onClick={() => pushDraft(cloneBoard(b))}
                   className="text-xs text-stone-200 hover:text-amber-200 truncate text-left flex-1 cursor-pointer"
                 >
-                  {b.name} <span className="text-stone-500 font-mono">({b.rows}×{b.cols})</span>
+                  {b.name} <span className="text-stone-500 font-mono">({b.rows}x{b.cols})</span>
                 </button>
                 {!b.isBuiltin && (
                   <button
@@ -531,7 +595,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
               <Undo2 className="w-3 h-3" /> Undo
             </button>
             <span className="font-mono text-amber-300">
-              {draft.rows}×{draft.cols}
+              {draft.rows}x{draft.cols} · {activePlayers.length}P
             </span>
           </div>
         </div>
@@ -548,7 +612,7 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
         />
       </div>
 
-      {/* Right: Paint Palette */}
+      {/* Right: Paint Palette (Zero Emojis) */}
       <div className="lg:col-span-3 space-y-4">
         <div className="parchment-panel rounded-2xl p-4 space-y-2.5">
           <h3 className="text-xs font-bold uppercase tracking-wider text-amber-300">
@@ -559,20 +623,22 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
               [
                 ['Normal Tile', { rule: 'normal' }],
                 ['Void Chasm', { rule: 'void' }],
-                ['🧱 Stone Wall', { rule: 'wall' }],
-                ['🛡 Sanctuary', { rule: 'sanctuary' }],
-                ['❄ Ice Slide', { rule: 'ice' }],
-                ['⚠ Spike Trap', { rule: 'trap' }],
-                ['⚡ Power Boost', { rule: 'boost' }],
-                ['♛ Crown Summit', { rule: 'summit' }],
-                ['# Fallow (2x)', { rule: 'fallow', fallowUses: 2 }],
-                ['# Fallow (3x)', { rule: 'fallow', fallowUses: 3 }],
-                ['★ Promo (White)', { rule: 'promotion', promotionFor: 'white' }],
-                ['★ Promo (Black)', { rule: 'promotion', promotionFor: 'black' }],
-                ['★ Promo (Both)', { rule: 'promotion', promotionFor: 'both' }],
-                ['◎ Portal A', { rule: 'portal', portalChannel: 'A' as PortalChannel }],
-                ['◎ Portal B', { rule: 'portal', portalChannel: 'B' as PortalChannel }],
-                ['◎ Portal C', { rule: 'portal', portalChannel: 'C' as PortalChannel }],
+                ['Stone Wall', { rule: 'wall' }],
+                ['Sanctuary (Safe)', { rule: 'sanctuary' }],
+                ['Ice Slide', { rule: 'ice' }],
+                ['Spike Trap', { rule: 'trap' }],
+                ['Power Boost (+1)', { rule: 'boost' }],
+                ['Crown Summit', { rule: 'summit' }],
+                ['Fallow (2x)', { rule: 'fallow', fallowUses: 2 }],
+                ['Fallow (3x)', { rule: 'fallow', fallowUses: 3 }],
+                ['Promo (White)', { rule: 'promotion', promotionFor: 'white' }],
+                ['Promo (Black)', { rule: 'promotion', promotionFor: 'black' }],
+                ['Promo (Red)', { rule: 'promotion', promotionFor: 'red' }],
+                ['Promo (Blue)', { rule: 'promotion', promotionFor: 'blue' }],
+                ['Promo (All)', { rule: 'promotion', promotionFor: 'all' }],
+                ['Portal A', { rule: 'portal', portalChannel: 'A' as PortalChannel }],
+                ['Portal B', { rule: 'portal', portalChannel: 'B' as PortalChannel }],
+                ['Portal C', { rule: 'portal', portalChannel: 'C' as PortalChannel }],
               ] as [string, TileConfig][]
             ).map(([label, tileCfg]) => {
               const active =
@@ -617,8 +683,8 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5">
-            {(['white', 'black'] as Color[]).map((col) => (
+          <div className="grid grid-cols-4 gap-1">
+            {(['white', 'black', 'red', 'blue'] as Color[]).map((col) => (
               <button
                 key={col}
                 type="button"
@@ -628,18 +694,18 @@ export const BoardForgeView: React.FC<BoardForgeViewProps> = ({
                     setTool({ ...tool, color: col });
                   }
                 }}
-                className={`py-1.5 rounded-lg text-xs font-semibold capitalize border cursor-pointer ${
+                className={`py-1.5 rounded-lg text-[11px] font-semibold border cursor-pointer ${
                   paintColor === col
                     ? 'bg-amber-600 text-stone-950 border-amber-400'
                     : 'bg-[#19130e] text-stone-300 border-amber-500/20'
                 }`}
               >
-                {col} Side
+                {COLOR_LABELS[col]}
               </button>
             ))}
           </div>
 
-          <div className="grid grid-cols-3 gap-1.5 max-h-72 overflow-y-auto pr-1">
+          <div className="grid grid-cols-3 gap-1.5 max-h-64 overflow-y-auto pr-1">
             {pieces.map((p) => {
               const active =
                 tool.kind === 'piece' && tool.pieceId === p.id && tool.color === paintColor;

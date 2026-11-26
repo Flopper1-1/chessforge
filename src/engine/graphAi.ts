@@ -1,5 +1,6 @@
 import {
   AIDifficulty,
+  ALL_COLORS,
   BoardDefinition,
   BoardGraphAnalysis,
   Color,
@@ -16,26 +17,13 @@ import {
   generateLegalMoves,
   getBoardRules,
   isColorInCheck,
-  oppositeColor,
+  isImpassableTile,
+  nextActiveColor,
   PieceRegistry,
+  rotateDirectionForColor,
+  rotateOffsetForColor,
 } from './rules';
 
-function flipDir(dir: Direction8, color: Color): Direction8 {
-  if (color === 'white') return dir;
-  const map: Record<Direction8, Direction8> = {
-    N: 'S', NE: 'SE', E: 'E', SE: 'NE', S: 'N', SW: 'NW', W: 'W', NW: 'SW',
-  };
-  return map[dir];
-}
-
-/**
- * Graph-Theory Board & Piece Analyzer
- * Builds a directed movement graph G = (V, E) for each piece type on the arbitrary
- * board topology, computing:
- * 1) Dynamic material values from average out-degree (mobility) + special rule modifiers.
- * 2) Dynamic Piece-Square Tables (PSTs) from local graph centrality, BFS distance to
- *    promotion zones, Sanctuary safety, and Portal connectivity.
- */
 export function analyzeBoardGraph(
   tiles: TileConfig[][],
   pieceIds: string[],
@@ -52,7 +40,7 @@ export function analyzeBoardGraph(
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const t = tiles[r][c];
-      if (t.rule !== 'void' && t.rule !== 'wall') activeTileCount++;
+      if (!isImpassableTile(t)) activeTileCount++;
       if (t.rule === 'sanctuary') sanctuaryCount++;
       if (t.rule === 'portal' && t.portalChannel) {
         if (!portalMap[t.portalChannel]) portalMap[t.portalChannel] = [];
@@ -70,20 +58,21 @@ export function analyzeBoardGraph(
 
     const whiteGraph = buildPieceGraph(tiles, def, 'white', portalMap);
     const blackGraph = buildPieceGraph(tiles, def, 'black', portalMap);
+    const redGraph = buildPieceGraph(tiles, def, 'red', portalMap);
+    const blueGraph = buildPieceGraph(tiles, def, 'blue', portalMap);
 
     const avgMobility =
       activeTileCount > 0
         ? (whiteGraph.totalEdges + blackGraph.totalEdges) / (2 * activeTileCount)
         : 0;
 
-    // Dynamic material valuation (in centipawns, roughly scaled to classic chess: Pawn ~100, Knight ~320, Rook ~500, Queen ~900)
     let value = Math.round(avgMobility * 42);
-    if (def.hops.length > 0) value += Math.min(140, def.hops.length * 16); // leaping ignores blockers
-    if (def.rules.rangedAttack) value += 210; // capturing without risking piece
-    if (def.rules.iron) value += 360; // immune to normal captures
-    if (def.rules.blacksmith) value += 130; // counters Iron
-    if (def.rules.explosive) value += 170; // 3x3 capture blast
-    if (def.rules.phasing) value += 110; // passes through friendlies
+    if (def.hops.length > 0) value += Math.min(140, def.hops.length * 16);
+    if (def.rules.rangedAttack) value += 210;
+    if (def.rules.iron) value += 360;
+    if (def.rules.blacksmith) value += 130;
+    if (def.rules.explosive) value += 170;
+    if (def.rules.phasing) value += 110;
     if (def.rules.pawnDoubleStep) value += 35;
     if (def.rules.royal) value = 20000;
     else value = Math.max(85, value);
@@ -92,8 +81,12 @@ export function analyzeBoardGraph(
       pieceId: pid,
       materialValue: value,
       avgMobility: Number(avgMobility.toFixed(2)),
-      pstWhite: whiteGraph.pst,
-      pstBlack: blackGraph.pst,
+      pstByColor: {
+        white: whiteGraph.pst,
+        black: blackGraph.pst,
+        red: redGraph.pst,
+        blue: blueGraph.pst,
+      },
     };
   }
 
@@ -106,9 +99,6 @@ export function analyzeBoardGraph(
   };
 }
 
-/**
- * Estimates a piece's standalone value on a standard 8x8 board (used live in Piece Forge).
- */
 export function estimatePieceValueOnStandardBoard(def: PieceDefinition): {
   points: number;
   avgMobility: number;
@@ -134,9 +124,7 @@ function buildPieceGraph(
 ): { totalEdges: number; pst: number[][] } {
   const rows = tiles.length;
   const cols = tiles[0].length;
-  const dirSign = color === 'white' ? 1 : -1;
 
-  // Reverse adjacency list for BFS from promotion goals
   const revAdj: number[][][] = Array.from({ length: rows }, () =>
     Array.from({ length: cols }, () => [])
   );
@@ -150,11 +138,11 @@ function buildPieceGraph(
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const t = tiles[r][c];
-      if (t.rule === 'void') continue;
+      if (isImpassableTile(t)) continue;
       if (
         !def.rules.royal &&
         t.rule === 'promotion' &&
-        (t.promotionFor === 'both' || t.promotionFor === color) &&
+        (t.promotionFor === 'both' || t.promotionFor === 'all' || t.promotionFor === color) &&
         (t.promoteToPieceId || 'queen') !== def.id
       ) {
         promoGoals.push({ r, c });
@@ -162,31 +150,29 @@ function buildPieceGraph(
 
       const targets = new Set<number>();
 
-      // Hops
       for (const hop of def.hops) {
-        const tr = r + hop.dr * dirSign;
-        const tc = c + hop.dc;
-        if (tr >= 0 && tr < rows && tc >= 0 && tc < cols && tiles[tr][tc].rule !== 'void') {
+        const rot = rotateOffsetForColor(hop.dr, hop.dc, color);
+        const tr = r + rot.dr;
+        const tc = c + rot.dc;
+        if (tr >= 0 && tr < rows && tc >= 0 && tc < cols && !isImpassableTile(tiles[tr][tc])) {
           targets.add(tr * cols + tc);
         }
       }
 
-      // Slides
       for (const [rawDir, maxDist] of Object.entries(def.slides) as [Direction8, number | undefined][]) {
         if (!maxDist || maxDist <= 0) continue;
-        const actual = flipDir(rawDir, color);
+        const actual = rotateDirectionForColor(rawDir, color);
         const { dr, dc } = DIRECTIONS_8[actual];
         for (let step = 1; step <= maxDist; step++) {
           const tr = r + dr * step;
           const tc = c + dc * step;
-          if (tr < 0 || tr >= rows || tc < 0 || tc >= cols || tiles[tr][tc].rule === 'void') {
+          if (tr < 0 || tr >= rows || tc < 0 || tc >= cols || isImpassableTile(tiles[tr][tc])) {
             break;
           }
           targets.add(tr * cols + tc);
         }
       }
 
-      // Portal edges: landing on a portal connects to its twin
       const expanded = new Set<number>(targets);
       for (const idx of targets) {
         const tr = Math.floor(idx / cols);
@@ -212,7 +198,6 @@ function buildPieceGraph(
     }
   }
 
-  // BFS shortest distance to promotion goals (if any exist for this piece)
   const distToPromo: number[][] = Array.from({ length: rows }, () =>
     Array.from({ length: cols }, () => 99)
   );
@@ -237,7 +222,6 @@ function buildPieceGraph(
     }
   }
 
-  // Combine centrality + promotion proximity + sanctuary/portal bonuses into 0..1 heatmap
   let maxDeg = 1;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -252,7 +236,7 @@ function buildPieceGraph(
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const t = tiles[r][c];
-      if (t.rule === 'void') {
+      if (isImpassableTile(t)) {
         pst[r][c] = 0;
         continue;
       }
@@ -263,13 +247,21 @@ function buildPieceGraph(
           ? 1 / (1 + distToPromo[r][c] * 0.45)
           : 0;
 
-      // Slight forward advancement bonus for non-royals, safety/shelter for royals
-      const advance = color === 'white' ? (rows - 1 - r) / Math.max(1, rows - 1) : r / Math.max(1, rows - 1);
+      const advance =
+        color === 'white'
+          ? (rows - 1 - r) / Math.max(1, rows - 1)
+          : color === 'black'
+            ? r / Math.max(1, rows - 1)
+            : color === 'red'
+              ? c / Math.max(1, cols - 1)
+              : (cols - 1 - c) / Math.max(1, cols - 1);
+
       const sanctuaryBonus = t.rule === 'sanctuary' ? 0.35 : 0;
       const portalBonus = t.rule === 'portal' ? 0.12 : 0;
       const boostBonus = t.rule === 'boost' ? 0.18 : 0;
       const summitBonus = t.rule === 'summit' && def.rules.royal ? 0.6 : 0;
-      const hazardPenalty = t.rule === 'fallow' ? -0.1 : t.rule === 'trap' && !def.rules.royal && !def.rules.iron ? -0.45 : 0;
+      const hazardPenalty =
+        t.rule === 'fallow' ? -0.1 : t.rule === 'trap' && !def.rules.royal && !def.rules.iron ? -0.45 : 0;
 
       let score: number;
       if (def.rules.royal) {
@@ -288,17 +280,20 @@ function buildPieceGraph(
 }
 
 /**
- * Evaluates a board position from White's perspective (+ = White winning, - = Black winning).
+ * Evaluates a position from `perspective`'s point of view (+ = perspective winning).
+ * In Antichess, the sign is flipped so losing pieces is rewarded!
  */
 export function evaluatePosition(
   tiles: TileConfig[][],
   grid: (import('./types').PlacedPiece | null)[][],
   analysis: BoardGraphAnalysis,
-  registry: PieceRegistry
+  registry: PieceRegistry,
+  perspective: Color = 'white',
+  isAntichess = false
 ): number {
   const rows = tiles.length;
   const cols = tiles[0].length;
-  let score = 0;
+  const totals: Record<Color, number> = { white: 0, black: 0, red: 0, blue: 0 };
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -306,21 +301,21 @@ export function evaluatePosition(
       if (!p) continue;
       const m = analysis.metricsByPiece[p.pieceId];
       const mat = m ? m.materialValue : 150;
-      const pstVal = m
-        ? p.color === 'white'
-          ? m.pstWhite[r]?.[c] ?? 0.5
-          : m.pstBlack[r]?.[c] ?? 0.5
-        : 0.5;
-      // Positional bonus scaled up to ~75 centipawns (or 120 on Sanctuary)
+      const pstVal = m?.pstByColor[p.color]?.[r]?.[c] ?? 0.5;
       const posBonus = Math.round(pstVal * (registry[p.pieceId]?.rules.royal ? 95 : 75));
-      if (p.color === 'white') {
-        score += mat + posBonus;
-      } else {
-        score -= mat + posBonus;
-      }
+      totals[p.color] += mat + posBonus;
     }
   }
-  return score;
+
+  let bestEnemy = 0;
+  for (const col of ALL_COLORS) {
+    if (col !== perspective && totals[col] > bestEnemy) {
+      bestEnemy = totals[col];
+    }
+  }
+
+  const diff = totals[perspective] - bestEnemy;
+  return isAntichess ? -diff : diff;
 }
 
 function scoreMoveForOrdering(move: Move, analysis: BoardGraphAnalysis): number {
@@ -328,7 +323,7 @@ function scoreMoveForOrdering(move: Move, analysis: BoardGraphAnalysis): number 
   if (move.captured) {
     const victimVal = analysis.metricsByPiece[move.captured.pieceId]?.materialValue ?? 200;
     score += 10000 + victimVal * 10;
-    if (move.isRangedCapture) score += 400; // free ranged capture!
+    if (move.isRangedCapture) score += 400;
   }
   if (move.promotedTo) score += 8000;
   if (move.portalExit) score += 250;
@@ -350,6 +345,7 @@ export function chooseAIMove(
   cachedAnalysis?: BoardGraphAnalysis
 ): AISearchResult {
   const rules = getBoardRules(state.boardDef);
+  const isAntichess = rules.winCondition === 'antichess';
   const pieceIds = collectBoardPieceIds(state.boardDef, state.grid, registry);
   const analysis = cachedAnalysis ?? analyzeBoardGraph(state.tiles, pieceIds, registry);
 
@@ -359,32 +355,34 @@ export function chooseAIMove(
     state.turn,
     registry,
     rules,
-    state.enPassantTarget
+    state.enPassantTarget,
+    state.lostByColor
   );
   if (legalMoves.length === 0) {
     return { bestMove: null, score: 0, nodesSearched: 0, depthReached: 0, analysis };
   }
 
+  const aiColor = state.turn;
+  const isMulti = state.players.length > 2;
   const config =
     difficulty === 'novice'
-      ? { maxDepth: 2, timeBudgetMs: 180, noise: 65 }
+      ? { maxDepth: 2, timeBudgetMs: 160, noise: 65 }
       : difficulty === 'tactician'
-        ? { maxDepth: 3, timeBudgetMs: 420, noise: 12 }
-        : { maxDepth: 4, timeBudgetMs: 750, noise: 0 };
+        ? { maxDepth: isMulti ? 2 : 3, timeBudgetMs: 360, noise: 12 }
+        : { maxDepth: isMulti ? 3 : 4, timeBudgetMs: 650, noise: 0 };
 
   const deadline = performance.now() + config.timeBudgetMs;
   let nodesSearched = 0;
-  const maximizing = state.turn === 'white';
 
   const ordered = [...legalMoves].sort(
     (a, b) => scoreMoveForOrdering(b, analysis) - scoreMoveForOrdering(a, analysis)
   );
 
   let bestMove = ordered[0];
-  let bestScore = maximizing ? -Infinity : Infinity;
+  let bestScore = -Infinity;
   let depthReached = 1;
 
-  function alphabeta(
+  function paranoidAlphaBeta(
     tiles: TileConfig[][],
     grid: (import('./types').PlacedPiece | null)[][],
     depth: number,
@@ -394,25 +392,29 @@ export function chooseAIMove(
   ): number {
     nodesSearched++;
     if (depth === 0 || performance.now() > deadline) {
-      return evaluatePosition(tiles, grid, analysis, registry);
+      return evaluatePosition(tiles, grid, analysis, registry, aiColor, isAntichess);
     }
 
     const moves = generateLegalMoves(tiles, grid, turn, registry, rules);
     if (moves.length === 0) {
       const inCheck = isColorInCheck(tiles, grid, turn, registry, rules);
-      if (inCheck) {
-        return turn === 'white' ? -100000 - depth * 100 : 100000 + depth * 100;
+      if (isAntichess) {
+        return turn === aiColor ? 100000 + depth * 100 : -100000 - depth * 100;
       }
-      return 0; // stalemate
+      if (inCheck) {
+        return turn === aiColor ? -100000 - depth * 100 : 100000 + depth * 100;
+      }
+      return 0;
     }
 
     moves.sort((a, b) => scoreMoveForOrdering(b, analysis) - scoreMoveForOrdering(a, analysis));
+    const nextTurn = nextActiveColor(turn, state.players, state.eliminatedPlayers);
 
-    if (turn === 'white') {
+    if (turn === aiColor) {
       let value = -Infinity;
       for (const m of moves) {
         const next = applyMoveToBoard(tiles, grid, m, registry);
-        const child = alphabeta(next.tiles, next.grid, depth - 1, alpha, beta, 'black');
+        const child = paranoidAlphaBeta(next.tiles, next.grid, depth - 1, alpha, beta, nextTurn);
         if (child > value) value = child;
         if (value > alpha) alpha = value;
         if (alpha >= beta) break;
@@ -422,7 +424,7 @@ export function chooseAIMove(
       let value = Infinity;
       for (const m of moves) {
         const next = applyMoveToBoard(tiles, grid, m, registry);
-        const child = alphabeta(next.tiles, next.grid, depth - 1, alpha, beta, 'white');
+        const child = paranoidAlphaBeta(next.tiles, next.grid, depth - 1, alpha, beta, nextTurn);
         if (child < value) value = child;
         if (value < beta) beta = value;
         if (alpha >= beta) break;
@@ -431,35 +433,30 @@ export function chooseAIMove(
     }
   }
 
+  const nextAfterRoot = nextActiveColor(aiColor, state.players, state.eliminatedPlayers);
+
   for (let depth = 1; depth <= config.maxDepth; depth++) {
     if (depth > 1 && performance.now() > deadline) break;
     let iterBestMove = ordered[0];
-    let iterBestScore = maximizing ? -Infinity : Infinity;
+    let iterBestScore = -Infinity;
 
     for (const m of ordered) {
       if (depth > 1 && performance.now() > deadline) break;
       const next = applyMoveToBoard(state.tiles, state.grid, m, registry);
-      let score = alphabeta(
+      let score = paranoidAlphaBeta(
         next.tiles,
         next.grid,
         depth - 1,
         -Infinity,
         Infinity,
-        oppositeColor(state.turn)
+        nextAfterRoot
       );
       if (config.noise > 0) {
         score += (Math.random() - 0.5) * config.noise;
       }
-      if (maximizing) {
-        if (score > iterBestScore) {
-          iterBestScore = score;
-          iterBestMove = m;
-        }
-      } else {
-        if (score < iterBestScore) {
-          iterBestScore = score;
-          iterBestMove = m;
-        }
+      if (score > iterBestScore) {
+        iterBestScore = score;
+        iterBestMove = m;
       }
     }
 
@@ -470,7 +467,7 @@ export function chooseAIMove(
 
   return {
     bestMove,
-    score: Math.round(bestScore),
+    score: Math.round(aiColor === 'white' ? bestScore : -bestScore),
     nodesSearched,
     depthReached,
     analysis,

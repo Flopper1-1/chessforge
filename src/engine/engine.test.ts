@@ -292,4 +292,51 @@ describe('ChessForge Variant Engine', () => {
     expect(afterTrap.grid[3][4]).toBeNull();
     expect(afterTrap.tiles[3][4].rule).toBe('normal');
   });
+
+  it('supports 4-Player Grand Cross turn rotation (White -> Red -> Black -> Blue) and elimination', () => {
+    const cross = BUILTIN_BOARDS.find((b) => b.id === 'four-player-cross')!;
+    let state = createInitialGameState(cross, registry);
+    expect(state.players).toEqual(['white', 'red', 'black', 'blue']);
+    expect(state.turn).toBe('white');
+
+    const wMove = generateLegalMoves(state.tiles, state.grid, 'white', registry, getBoardRules(cross))[0];
+    state = makeGameMove(state, wMove, registry);
+    expect(state.turn).toBe('red');
+
+    // Red pawn at (2,1) marches East to (2,2) or (2,3)
+    const rMoves = generateLegalMoves(state.tiles, state.grid, 'red', registry, getBoardRules(cross));
+    expect(rMoves.some((m) => m.from.r === 2 && m.from.c === 1 && m.to.r === 2 && m.to.c === 2)).toBe(true);
+    state = makeGameMove(state, rMoves[0], registry);
+    expect(state.turn).toBe('black');
+  });
+
+  it('supports Antichess (forced captures) and Race to Promote win conditions', () => {
+    // 1. Antichess forced capture
+    const anti = emptyBoard(5, 5);
+    anti.rules = { winCondition: 'antichess' };
+    anti.initialPieces[4][0] = makePiece('king', 'white');
+    anti.initialPieces[0][4] = makePiece('king', 'black');
+    anti.initialPieces[2][0] = makePiece('rook', 'white');
+    anti.initialPieces[2][3] = makePiece('pawn', 'black');
+    const antiState = createInitialGameState(anti, registry);
+    const antiMoves = generateLegalMoves(antiState.tiles, antiState.grid, 'white', registry, getBoardRules(anti));
+    // Every legal move must be a capture!
+    expect(antiMoves.length).toBe(1);
+    expect(antiMoves[0].captured?.pieceId).toBe('pawn');
+
+    // 2. Race to Promote
+    const race = emptyBoard(5, 5);
+    race.rules = { winCondition: 'race_to_promote' };
+    race.tiles[0][2] = { rule: 'promotion', promotionFor: 'white' };
+    race.initialPieces[4][0] = makePiece('king', 'white');
+    race.initialPieces[0][4] = makePiece('king', 'black');
+    race.initialPieces[1][2] = makePiece('pawn', 'white');
+    const raceState = createInitialGameState(race, registry);
+    const promo = generateLegalMoves(raceState.tiles, raceState.grid, 'white', registry, getBoardRules(race)).find(
+      (m) => m.promotedTo === 'queen'
+    )!;
+    const afterRace = makeGameMove(raceState, promo, registry);
+    expect(afterRace.status).toBe('victory');
+    expect(afterRace.winner).toBe('white');
+  });
 });

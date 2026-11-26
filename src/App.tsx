@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Compass,
+  Crown,
   Grid,
   Hammer,
   Sliders,
   Swords,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
 import { ADVENTURE_NODES, BUILTIN_BOARDS, BUILTIN_PIECES } from './engine/presets';
 import {
@@ -163,7 +165,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-700 flex items-center justify-center shadow-lg border border-amber-200/40">
-              <span className="font-display font-extrabold text-stone-950 text-lg">♞</span>
+              <Crown className="w-5 h-5 text-stone-950" />
             </div>
             <div>
               <h1 className="font-display text-lg font-extrabold tracking-wide text-amber-100 leading-none">
@@ -289,9 +291,10 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowSettings(false)}
-                className="text-stone-400 hover:text-white text-sm cursor-pointer"
+                className="text-stone-400 hover:text-white p-1 cursor-pointer"
+                aria-label="Close"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -405,9 +408,9 @@ export default function App() {
               <span className="text-xs font-semibold text-stone-300">Board Aids</span>
               {(
                 [
-                  ['showLegalMoves', 'Highlight Legal Moves (dots, Castling ⇄, En Passant EP)'],
+                  ['showLegalMoves', 'Highlight Legal Moves (dots, Castling O-O, En Passant EP)'],
                   ['showLastMove', 'Highlight Last Move Squares'],
-                  ['showCoordinates', 'Show Rank & File Coordinates (a1–h8)'],
+                  ['showCoordinates', 'Show Rank & File Coordinates (a1-h8)'],
                   ['soundEnabled', 'Enable Tactile Sound Effects'],
                 ] as const
               ).map(([key, label]) => (

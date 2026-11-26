@@ -1,7 +1,9 @@
 import {
+  ALL_COLORS,
   BoardDefinition,
   BoardRuleSettings,
   Color,
+  COLOR_LABELS,
   Coord,
   DEFAULT_BOARD_RULES,
   Direction8,
@@ -16,8 +18,31 @@ import {
 
 export type PieceRegistry = Record<string, PieceDefinition>;
 
-export function oppositeColor(color: Color): Color {
-  return color === 'white' ? 'black' : 'white';
+export function getBoardPlayers(boardDef: BoardDefinition): Color[] {
+  if (boardDef.players && boardDef.players.length >= 2) {
+    return boardDef.players;
+  }
+  const present = new Set<Color>();
+  for (const row of boardDef.initialPieces) {
+    for (const p of row) {
+      if (p) present.add(p.color);
+    }
+  }
+  const ordered = ALL_COLORS.filter((c) => present.has(c));
+  return ordered.length >= 2 ? ordered : ['white', 'black'];
+}
+
+export function nextActiveColor(
+  current: Color,
+  players: Color[],
+  eliminated: Color[]
+): Color {
+  const idx = players.indexOf(current);
+  for (let i = 1; i <= players.length; i++) {
+    const candidate = players[(idx + i) % players.length];
+    if (!eliminated.includes(candidate)) return candidate;
+  }
+  return current;
 }
 
 export function getBoardRules(boardDef: BoardDefinition): BoardRuleSettings {
@@ -45,6 +70,15 @@ export function cloneGrid(grid: (PlacedPiece | null)[][]): (PlacedPiece | null)[
   return grid.map((row) => row.map((p) => (p ? { ...p } : null)));
 }
 
+export function emptyColorMap<T>(factory: () => T): Record<Color, T> {
+  return {
+    white: factory(),
+    black: factory(),
+    red: factory(),
+    blue: factory(),
+  };
+}
+
 export function computePositionHash(
   grid: (PlacedPiece | null)[][],
   turn: Color,
@@ -67,21 +101,58 @@ export function computePositionHash(
   return parts.join('|');
 }
 
+/**
+ * Rotates a White-relative (dr, dc) offset into the given player's forward orientation:
+ * - white: North (-1, 0)
+ * - black: South (+1, 0)
+ * - red:   East  (0, +1)
+ * - blue:  West  (0, -1)
+ */
+export function rotateOffsetForColor(
+  dr: number,
+  dc: number,
+  color: Color
+): { dr: number; dc: number } {
+  switch (color) {
+    case 'white':
+      return { dr, dc };
+    case 'black':
+      return { dr: -dr, dc: -dc };
+    case 'red':
+      return { dr: dc, dc: -dr };
+    case 'blue':
+      return { dr: -dc, dc: dr };
+  }
+}
+
+export function rotateDirectionForColor(dir: Direction8, color: Color): Direction8 {
+  if (color === 'white') return dir;
+  const ring: Direction8[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const idx = ring.indexOf(dir);
+  const shift = color === 'red' ? 2 : color === 'black' ? 4 : 6;
+  return ring[(idx + shift) % 8];
+}
+
 export function createInitialGameState(
   boardDef: BoardDefinition,
   registry: PieceRegistry
 ): GameState {
   const tiles = cloneTiles(boardDef.tiles);
   const grid = cloneGrid(boardDef.initialPieces);
-  const hash = computePositionHash(grid, 'white', null);
+  const players = getBoardPlayers(boardDef);
+  const firstTurn = players[0] ?? 'white';
+  const hash = computePositionHash(grid, firstTurn, null);
   const base: GameState = {
     boardDef,
     tiles,
     grid,
-    turn: 'white',
+    players,
+    eliminatedPlayers: [],
+    turn: firstTurn,
     moveHistory: [],
-    capturedByWhite: [],
-    capturedByBlack: [],
+    capturedByColor: emptyColorMap(() => []),
+    lostByColor: emptyColorMap(() => []),
+    checksDelivered: emptyColorMap(() => 0),
     status: 'playing',
     halfMoveClock: 0,
     enPassantTarget: null,
@@ -90,24 +161,13 @@ export function createInitialGameState(
   return evaluateGameStatus(base, registry);
 }
 
-function flipDirectionForColor(dir: Direction8, color: Color): Direction8 {
-  if (color === 'white') return dir;
-  const map: Record<Direction8, Direction8> = {
-    N: 'S',
-    NE: 'SE',
-    E: 'E',
-    SE: 'NE',
-    S: 'N',
-    SW: 'NW',
-    W: 'W',
-    NW: 'SW',
-  };
-  return map[dir];
+export function isImpassableTile(tile: TileConfig): boolean {
+  return tile.rule === 'void' || tile.rule === 'wall';
 }
 
 export function canCaptureTarget(
   attackerDef: PieceDefinition,
-  targetPiece: PlacedPiece,
+  _targetPiece: PlacedPiece,
   targetDef: PieceDefinition,
   targetTile: TileConfig
 ): boolean {
@@ -128,10 +188,8 @@ export function findPortalExit(
     for (let c = 0; c < cols; c++) {
       if (r === from.r && c === from.c) continue;
       const t = tiles[r][c];
-      if (t.rule === 'portal' && t.portalChannel === channel) {
-        if (!grid[r][c]) {
-          return { r, c };
-        }
+      if (t.rule === 'portal' && t.portalChannel === channel && !grid[r][c]) {
+        return { r, c };
       }
     }
   }
@@ -143,21 +201,48 @@ function getPromotionOptions(
   color: Color,
   tile: TileConfig,
   rules: BoardRuleSettings,
-  registry: PieceRegistry
+  registry: PieceRegistry,
+  lostByColor?: Record<Color, PlacedPiece[]>,
+  triggeredByCapture = false
 ): string[] | undefined {
-  if (tile.rule !== 'promotion') return undefined;
   if (def.rules.royal || def.rules.canPromote === false) return undefined;
-  if (tile.promotionFor !== 'both' && tile.promotionFor !== color) return undefined;
 
-  // If tile pins a specific fixed piece, only promote into that piece (unless already that piece)
-  if (tile.promoteToPieceId && registry[tile.promoteToPieceId]) {
+  const onPromoTile =
+    tile.rule === 'promotion' &&
+    (tile.promotionFor === 'both' || tile.promotionFor === 'all' || tile.promotionFor === color);
+
+  const shouldPromote = onPromoTile || (triggeredByCapture && rules.promoteOnCapture);
+  if (!shouldPromote) return undefined;
+
+  if (onPromoTile && tile.promoteToPieceId && registry[tile.promoteToPieceId]) {
     return def.id === tile.promoteToPieceId ? undefined : [tile.promoteToPieceId];
   }
 
-  // Otherwise use the board's promotionPool (filtered to valid non-royal pieces != current piece)
-  const pool = rules.promotionPool.filter(
-    (pid) => registry[pid] && !registry[pid].rules.royal && pid !== def.id
-  );
+  let pool: string[];
+  if (rules.promotionMode === 'all_non_royal') {
+    pool = Object.values(registry)
+      .filter((p) => !p.rules.royal && p.id !== def.id)
+      .map((p) => p.id);
+  } else if (rules.promotionMode === 'captured_only') {
+    const lost = lostByColor?.[color] ?? [];
+    const uniqueLost = Array.from(
+      new Set(lost.map((p) => p.pieceId).filter((pid) => registry[pid] && !registry[pid].rules.royal && pid !== def.id))
+    );
+    pool = uniqueLost;
+  } else if (rules.promotionMode === 'random_pool') {
+    const valid = rules.promotionPool.filter(
+      (pid) => registry[pid] && !registry[pid].rules.royal && pid !== def.id
+    );
+    if (valid.length === 0) return undefined;
+    // Deterministic pick per position/tile or random pick at execution time:
+    const pick = valid[Math.floor(Math.random() * valid.length)];
+    return [pick];
+  } else {
+    pool = rules.promotionPool.filter(
+      (pid) => registry[pid] && !registry[pid].rules.royal && pid !== def.id
+    );
+  }
+
   return pool.length > 0 ? pool : undefined;
 }
 
@@ -178,11 +263,11 @@ function formatNotation(
   }
   const fromStr = coordToAlgebraic(from.r, from.c, rows);
   const toStr = coordToAlgebraic(to.r, to.c, rows);
-  const sep = isRanged ? '→×' : isCapture ? '×' : '-';
+  const sep = isRanged ? '->x' : isCapture ? 'x' : '-';
   let out = `${def.shortCode}${fromStr}${sep}${toStr}`;
   if (isEnPassant) out += ' e.p.';
   if (portalExit) {
-    out += `⟿${coordToAlgebraic(portalExit.r, portalExit.c, rows)}`;
+    out += `>${coordToAlgebraic(portalExit.r, portalExit.c, rows)}`;
   }
   if (promotedTo) {
     out += `=${promotedTo[0].toUpperCase()}`;
@@ -190,14 +275,31 @@ function formatNotation(
   return out;
 }
 
+function isAttackingSquare(
+  def: PieceDefinition,
+  color: Color,
+  from: Coord,
+  to: Coord
+): boolean {
+  const dr = to.r - from.r;
+  const dc = to.c - from.c;
+  for (const h of def.hops) {
+    const rot = rotateOffsetForColor(h.dr, h.dc, color);
+    if (rot.dr === dr && rot.dc === dc) {
+      return h.mode === 'both' || h.mode === 'capture' || h.mode === 'ranged';
+    }
+  }
+  return true;
+}
+
 /**
- * Checks whether a specific square (tr, tc) is attacked by `byColor`.
+ * Checks whether a target square is attacked by any opponent of `defenderColor`.
  */
-export function isSquareAttackedBy(
+export function isSquareAttackedByEnemies(
   tiles: TileConfig[][],
   grid: (PlacedPiece | null)[][],
   target: Coord,
-  byColor: Color,
+  defenderColor: Color,
   registry: PieceRegistry,
   rules: BoardRuleSettings
 ): boolean {
@@ -206,11 +308,10 @@ export function isSquareAttackedBy(
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const p = grid[r][c];
-      if (!p || p.color !== byColor) continue;
+      if (!p || p.color === defenderColor) continue;
       const moves = generatePseudoMovesForSquare(tiles, grid, r, c, registry, rules, null, true);
       for (const m of moves) {
-        if (m.to.r === target.r && m.to.c === target.c && !m.castling) {
-          // For pawns/move-only hops, only count capture-capable attacks
+        if (m.to.r === target.r && m.to.c === target.c && !m.castling && !m.isSwap) {
           const def = registry[p.pieceId];
           if (!def) continue;
           if (m.captured || isAttackingSquare(def, p.color, { r, c }, target)) {
@@ -223,30 +324,6 @@ export function isSquareAttackedBy(
   return false;
 }
 
-function isImpassableTile(tile: TileConfig): boolean {
-  return tile.rule === 'void' || tile.rule === 'wall';
-}
-
-function isAttackingSquare(
-  def: PieceDefinition,
-  color: Color,
-  from: Coord,
-  to: Coord
-): boolean {
-  const dirSign = color === 'white' ? 1 : -1;
-  const dr = to.r - from.r;
-  const dc = to.c - from.c;
-  for (const h of def.hops) {
-    if (h.dr * dirSign === dr && h.dc === dc) {
-      return h.mode === 'both' || h.mode === 'capture' || h.mode === 'ranged';
-    }
-  }
-  return true;
-}
-
-/**
- * Generates pseudo-legal moves for a single piece at (r, c), ignoring self-check.
- */
 export function generatePseudoMovesForSquare(
   tiles: TileConfig[][],
   grid: (PlacedPiece | null)[][],
@@ -255,7 +332,8 @@ export function generatePseudoMovesForSquare(
   registry: PieceRegistry,
   rules: BoardRuleSettings,
   enPassantTarget?: GameState['enPassantTarget'],
-  skipCastling = false
+  skipCastling = false,
+  lostByColor?: Record<Color, PlacedPiece[]>
 ): Move[] {
   const piece = grid[r]?.[c];
   if (!piece) return [];
@@ -265,12 +343,17 @@ export function generatePseudoMovesForSquare(
   const rows = tiles.length;
   const cols = tiles[0].length;
   const moves: Move[] = [];
-  const dirSign = piece.color === 'white' ? 1 : -1;
 
-  const pushMoveWithPromotions = (base: Omit<Move, 'promotedTo' | 'notation'>, isCapture: boolean, isRanged: boolean) => {
+  const pushMoveWithPromotions = (
+    base: Omit<Move, 'promotedTo' | 'notation'>,
+    isCapture: boolean,
+    isRanged: boolean
+  ) => {
     const finalCoord = isRanged ? base.from : (base.portalExit ?? base.to);
     const finalTile = tiles[finalCoord.r][finalCoord.c];
-    const promoOpts = isRanged ? undefined : getPromotionOptions(def, piece.color, finalTile, rules, registry);
+    const promoOpts = isRanged
+      ? undefined
+      : getPromotionOptions(def, piece.color, finalTile, rules, registry, lostByColor, isCapture);
 
     if (promoOpts && promoOpts.length > 0) {
       for (const pid of promoOpts) {
@@ -368,14 +451,11 @@ export function generatePseudoMovesForSquare(
       return 'empty';
     }
 
-    if (occupant.color === piece.color) {
-      return 'friendly';
-    }
-
-    // Enemy piece
-    if (allowCapture) {
-      const targetDef = registry[occupant.pieceId];
-      if (targetDef && canCaptureTarget(def, occupant, targetDef, targetTile)) {
+    const isFriendly = occupant.color === piece.color;
+    const targetDef = registry[occupant.pieceId];
+    if (isFriendly) {
+      // Optional Friendly Fire rule (cannot capture own Royal)
+      if (rules.friendlyFire && allowCapture && targetDef && !targetDef.rules.royal && canCaptureTarget(def, occupant, targetDef, targetTile)) {
         const isRanged = forceRanged || Boolean(def.rules.rangedAttack);
         const post = isRanged ? {} : computePostLanding(tr, tc);
         pushMoveWithPromotions(
@@ -391,17 +471,37 @@ export function generatePseudoMovesForSquare(
           isRanged
         );
       }
+      return 'friendly';
+    }
+
+    // Enemy piece
+    if (allowCapture && targetDef && canCaptureTarget(def, occupant, targetDef, targetTile)) {
+      const isRanged = forceRanged || Boolean(def.rules.rangedAttack);
+      const post = isRanged ? {} : computePostLanding(tr, tc);
+      pushMoveWithPromotions(
+        {
+          from: { r, c },
+          to: { r: tr, c: tc },
+          portalExit: post.exit,
+          isIceSlide: post.isIce,
+          isRangedCapture: isRanged,
+          captured: occupant,
+        },
+        true,
+        isRanged
+      );
     }
     return 'enemy';
   };
 
-  // 1. Hops (7x7 relative offsets, can jump over anything including void/walls)
+  // 1. Hops (7x7 relative offsets, rotated per player color)
   for (const hop of def.hops) {
-    const tr = r + hop.dr * dirSign;
-    const tc = c + hop.dc;
+    const rot = rotateOffsetForColor(hop.dr, hop.dc, piece.color);
+    const tr = r + rot.dr;
+    const tc = c + rot.dc;
     if (hop.mode === 'first_move') {
       if (!piece.hasMoved) {
-        tryAddMove(tr, tc, true, false, Math.abs(hop.dr) >= 2);
+        tryAddMove(tr, tc, true, false, Math.abs(hop.dr) >= 2 || Math.abs(hop.dc) >= 2);
       }
     } else if (hop.mode === 'en_passant') {
       if (
@@ -443,7 +543,7 @@ export function generatePseudoMovesForSquare(
             from: { r, c },
             to: { r: tr, c: tc },
             isSwap: true,
-            notation: `${def.shortCode}${coordToAlgebraic(r, c, rows)}⇄${coordToAlgebraic(tr, tc, rows)}`,
+            notation: `${def.shortCode}${coordToAlgebraic(r, c, rows)}<->${coordToAlgebraic(tr, tc, rows)}`,
           });
         }
       }
@@ -457,7 +557,7 @@ export function generatePseudoMovesForSquare(
     }
   }
 
-  // 1b. Boost tile bonus: standing on a Boost rune grants +1 orthogonal step
+  // 1b. Boost tile bonus (+1 orthogonal step)
   if (tiles[r][c].rule === 'boost') {
     for (const [bdr, bdc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
       const tr = r + bdr;
@@ -468,25 +568,26 @@ export function generatePseudoMovesForSquare(
     }
   }
 
-  // 2. Pawn-like first double step
+  // 2. Pawn-like first double step (rotated for all 4 player orientations)
   if (def.rules.pawnDoubleStep && !piece.hasMoved) {
-    const step1r = r - 1 * dirSign;
-    const step2r = r - 2 * dirSign;
+    const fwd = rotateOffsetForColor(-1, 0, piece.color);
+    const s1r = r + fwd.dr;
+    const s1c = c + fwd.dc;
+    const s2r = r + fwd.dr * 2;
+    const s2c = c + fwd.dc * 2;
     if (
-      step1r >= 0 &&
-      step1r < rows &&
-      step2r >= 0 &&
-      step2r < rows &&
-      !isImpassableTile(tiles[step1r][c]) &&
-      !grid[step1r][c] &&
-      !isImpassableTile(tiles[step2r][c]) &&
-      !grid[step2r][c]
+      s1r >= 0 && s1r < rows && s1c >= 0 && s1c < cols &&
+      s2r >= 0 && s2r < rows && s2c >= 0 && s2c < cols &&
+      !isImpassableTile(tiles[s1r][s1c]) &&
+      !grid[s1r][s1c] &&
+      !isImpassableTile(tiles[s2r][s2c]) &&
+      !grid[s2r][s2c]
     ) {
-      tryAddMove(step2r, c, true, false, true);
+      tryAddMove(s2r, s2c, true, false, true);
     }
   }
 
-  // 3. En Passant capture
+  // 3. Standard En Passant capture (works for all 4 player orientations)
   if (
     rules.enPassantEnabled &&
     (def.rules.enPassant || def.rules.pawnDoubleStep) &&
@@ -494,19 +595,17 @@ export function generatePseudoMovesForSquare(
     enPassantTarget.pawnColor !== piece.color
   ) {
     const ep = enPassantTarget.targetSquare;
-    const epPawn = grid[enPassantTarget.pawnSquare.r]?.[enPassantTarget.pawnSquare.c];
-    const epTile = tiles[enPassantTarget.pawnSquare.r]?.[enPassantTarget.pawnSquare.c];
-    if (
-      epPawn &&
-      epTile &&
-      epTile.rule !== 'sanctuary' &&
-      ep.r === r - 1 * dirSign &&
-      Math.abs(ep.c - c) === 1 &&
-      tiles[ep.r]?.[ep.c]?.rule !== 'void' &&
-      !grid[ep.r][ep.c]
-    ) {
-      const targetDef = registry[epPawn.pieceId];
-      if (targetDef && canCaptureTarget(def, epPawn, targetDef, epTile)) {
+    const diagLeft = rotateOffsetForColor(-1, -1, piece.color);
+    const diagRight = rotateOffsetForColor(-1, 1, piece.color);
+    const matchesDiag =
+      (r + diagLeft.dr === ep.r && c + diagLeft.dc === ep.c) ||
+      (r + diagRight.dr === ep.r && c + diagRight.dc === ep.c);
+
+    if (matchesDiag && !isImpassableTile(tiles[ep.r][ep.c]) && !grid[ep.r][ep.c]) {
+      const epPawn = grid[enPassantTarget.pawnSquare.r]?.[enPassantTarget.pawnSquare.c];
+      const epTile = tiles[enPassantTarget.pawnSquare.r]?.[enPassantTarget.pawnSquare.c];
+      const targetDef = epPawn ? registry[epPawn.pieceId] : undefined;
+      if (epPawn && epTile && targetDef && canCaptureTarget(def, epPawn, targetDef, epTile)) {
         pushMoveWithPromotions(
           {
             from: { r, c },
@@ -521,87 +620,78 @@ export function generatePseudoMovesForSquare(
     }
   }
 
-  // 4. Sliding rays (8 directions)
+  // 4. Sliding rays (8 directions rotated per player color)
   const slideEntries = Object.entries(def.slides) as [Direction8, number | undefined][];
   for (const [rawDir, maxDist] of slideEntries) {
     if (!maxDist || maxDist <= 0) continue;
-    const actualDir = flipDirectionForColor(rawDir, piece.color);
+    const actualDir = rotateDirectionForColor(rawDir, piece.color);
     const { dr, dc } = DIRECTIONS_8[actualDir];
     for (let step = 1; step <= maxDist; step++) {
       const tr = r + dr * step;
       const tc = c + dc * step;
       const res = tryAddMove(tr, tc, true, true);
       if (res === 'friendly' && def.rules.phasing) {
-        continue; // Phasing pieces slide right through friendly pieces!
+        continue;
       }
       if (res !== 'empty') break;
     }
   }
 
-  // 5. Castling (for unmoved Royal pieces with castleKing enabled)
+  // 5. Castling (horizontal for White/Black, vertical for Red/Blue!)
   if (
     !skipCastling &&
     rules.castlingEnabled &&
     (def.rules.castleKing || def.rules.royal) &&
-    !piece.hasMoved
+    !piece.hasMoved &&
+    !isSquareAttackedByEnemies(tiles, grid, { r, c }, piece.color, registry, rules)
   ) {
-    const enemy = oppositeColor(piece.color);
-    // Cannot castle out of check
-    if (!isSquareAttackedBy(tiles, grid, { r, c }, enemy, registry, rules)) {
-      for (const side of ['kingside', 'queenside'] as const) {
-        const dcStep = side === 'kingside' ? 1 : -1;
-        // Scan along the same rank for an unmoved friendly castleRook
-        let rookCol = -1;
-        for (let sc = c + dcStep; sc >= 0 && sc < cols; sc += dcStep) {
-          if (tiles[r][sc].rule === 'void') break;
-          const occ = grid[r][sc];
-          if (occ) {
-            const occDef = registry[occ.pieceId];
-            if (
-              occ.color === piece.color &&
-              !occ.hasMoved &&
-              occDef &&
-              (occDef.rules.castleRook || occ.pieceId === 'rook')
-            ) {
-              rookCol = sc;
-            }
-            break;
-          }
-        }
+    const isVerticalAxis = piece.color === 'red' || piece.color === 'blue';
+    for (const side of ['kingside', 'queenside'] as const) {
+      const stepSign = side === 'kingside' ? 1 : -1;
+      const drStep = isVerticalAxis ? stepSign : 0;
+      const dcStep = isVerticalAxis ? 0 : stepSign;
 
-        if (rookCol !== -1 && Math.abs(rookCol - c) >= 2) {
-          const kingTargetCol = c + dcStep * 2;
-          const rookTargetCol = c + dcStep;
+      let rookCoord: Coord | null = null;
+      let sr = r + drStep;
+      let sc = c + dcStep;
+      while (sr >= 0 && sr < rows && sc >= 0 && sc < cols) {
+        if (isImpassableTile(tiles[sr][sc])) break;
+        const occ = grid[sr][sc];
+        if (occ) {
+          const occDef = registry[occ.pieceId];
           if (
-            kingTargetCol >= 0 &&
-            kingTargetCol < cols &&
-            tiles[r][kingTargetCol].rule !== 'void' &&
-            tiles[r][rookTargetCol].rule !== 'void'
+            occ.color === piece.color &&
+            !occ.hasMoved &&
+            occDef &&
+            (occDef.rules.castleRook || occ.pieceId === 'rook')
           ) {
-            // Ensure squares King passes through and lands on are not attacked
-            const passSafe = !isSquareAttackedBy(
-              tiles,
-              grid,
-              { r, c: rookTargetCol },
-              enemy,
-              registry,
-              rules
-            );
-            const landSafe = !isSquareAttackedBy(
-              tiles,
-              grid,
-              { r, c: kingTargetCol },
-              enemy,
-              registry,
-              rules
-            );
+            rookCoord = { r: sr, c: sc };
+          }
+          break;
+        }
+        sr += drStep;
+        sc += dcStep;
+      }
+
+      if (rookCoord) {
+        const dist = Math.abs(rookCoord.r - r) + Math.abs(rookCoord.c - c);
+        if (dist >= 2) {
+          const kTarget = { r: r + drStep * 2, c: c + dcStep * 2 };
+          const rTarget = { r: r + drStep, c: c + dcStep };
+          if (
+            kTarget.r >= 0 && kTarget.r < rows && kTarget.c >= 0 && kTarget.c < cols &&
+            !isImpassableTile(tiles[kTarget.r][kTarget.c]) &&
+            !isImpassableTile(tiles[rTarget.r][rTarget.c])
+          ) {
+            const passSafe = !isSquareAttackedByEnemies(tiles, grid, rTarget, piece.color, registry, rules);
+            const landSafe = !isSquareAttackedByEnemies(tiles, grid, kTarget, piece.color, registry, rules);
             if (passSafe && landSafe) {
               moves.push({
                 from: { r, c },
-                to: { r, c: kingTargetCol },
+                to: kTarget,
                 castling: {
-                  rookFrom: { r, c: rookCol },
-                  rookTo: { r, c: rookTargetCol },
+                  rookFrom: rookCoord,
+                  rookTo: rTarget,
                   side,
                 },
                 notation: side === 'kingside' ? 'O-O' : 'O-O-O',
@@ -663,7 +753,6 @@ export function applyMoveToBoard(
     const finalTile = nextTiles[finalCoord.r][finalCoord.c];
     const movingDef = registry?.[updatedPiece.pieceId];
 
-    // Spike Trap tile: destroys arriving non-Royal, non-Iron piece and disarms to normal
     if (finalTile.rule === 'trap') {
       nextTiles[finalCoord.r][finalCoord.c] = { rule: 'normal' };
       if (!movingDef?.rules.royal && !movingDef?.rules.iron) {
@@ -676,7 +765,6 @@ export function applyMoveToBoard(
       nextGrid[finalCoord.r][finalCoord.c] = updatedPiece;
     }
 
-    // Explosive / Atomic capture blast (destroys adjacent non-royal, non-sanctuary, non-iron pieces)
     const attackerDef = registry?.[moving.pieceId];
     if (move.captured && attackerDef?.rules.explosive && registry) {
       const rows = nextTiles.length;
@@ -699,11 +787,9 @@ export function applyMoveToBoard(
       }
     }
 
-    // Handle Fallow tile wear
     const landedTile = nextTiles[move.to.r][move.to.c];
     if (landedTile.rule === 'fallow') {
-      const remaining = (landedTile.fallowUses ?? 1) - 1;
-      landedTile.fallowUses = Math.max(0, remaining);
+      landedTile.fallowUses = Math.max(0, (landedTile.fallowUses ?? 1) - 1);
     }
     const departedTile = nextTiles[move.from.r][move.from.c];
     if (departedTile.rule === 'fallow' && (departedTile.fallowUses ?? 1) <= 0) {
@@ -721,23 +807,19 @@ export function isColorInCheck(
   registry: PieceRegistry,
   rules: BoardRuleSettings = DEFAULT_BOARD_RULES
 ): boolean {
+  if (rules.winCondition === 'capture_the_king' || rules.winCondition === 'antichess') {
+    return false;
+  }
   const rows = tiles.length;
   const cols = tiles[0].length;
-  const royalCoords: Coord[] = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const p = grid[r][c];
       if (p && p.color === color && registry[p.pieceId]?.rules.royal) {
-        royalCoords.push({ r, c });
+        if (isSquareAttackedByEnemies(tiles, grid, { r, c }, color, registry, rules)) {
+          return true;
+        }
       }
-    }
-  }
-  if (royalCoords.length === 0) return false;
-
-  const enemy = oppositeColor(color);
-  for (const rc of royalCoords) {
-    if (isSquareAttackedBy(tiles, grid, rc, enemy, registry, rules)) {
-      return true;
     }
   }
   return false;
@@ -749,11 +831,14 @@ export function generateLegalMoves(
   color: Color,
   registry: PieceRegistry,
   rules: BoardRuleSettings = DEFAULT_BOARD_RULES,
-  enPassantTarget?: GameState['enPassantTarget']
+  enPassantTarget?: GameState['enPassantTarget'],
+  lostByColor?: Record<Color, PlacedPiece[]>
 ): Move[] {
   const rows = tiles.length;
   const cols = tiles[0].length;
   const legal: Move[] = [];
+  const enforceCheckSafety =
+    rules.winCondition !== 'capture_the_king' && rules.winCondition !== 'antichess';
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -766,17 +851,34 @@ export function generateLegalMoves(
         c,
         registry,
         rules,
-        enPassantTarget
+        enPassantTarget,
+        false,
+        lostByColor
       );
       for (const m of pseudo) {
-        const next = applyMoveToBoard(tiles, grid, m, registry);
-        if (!isColorInCheck(next.tiles, next.grid, color, registry, rules)) {
+        if (!enforceCheckSafety) {
           legal.push(m);
+        } else {
+          const next = applyMoveToBoard(tiles, grid, m, registry);
+          if (!isColorInCheck(next.tiles, next.grid, color, registry, rules)) {
+            legal.push(m);
+          }
         }
       }
     }
   }
+
+  // Mandatory Capture rule (also automatically enforced in Antichess / Losing Chess)
+  if (rules.mandatoryCapture || rules.winCondition === 'antichess') {
+    const captures = legal.filter((m) => Boolean(m.captured));
+    if (captures.length > 0) return captures;
+  }
+
   return legal;
+}
+
+function clearPlayerPieces(grid: (PlacedPiece | null)[][], color: Color): (PlacedPiece | null)[][] {
+  return grid.map((row) => row.map((p) => (p && p.color === color ? null : p)));
 }
 
 function isInsufficientMaterial(
@@ -789,51 +891,41 @@ function isInsufficientMaterial(
       if (!p) continue;
       const def = registry[p.pieceId];
       if (!def) continue;
-      if (!def.rules.royal) {
-        nonRoyals.push(def);
-      }
+      if (!def.rules.royal) nonRoyals.push(def);
     }
   }
-  // King vs King
   if (nonRoyals.length === 0) return true;
-  // King + single minor (Bishop or Knight) vs King
-  if (
-    nonRoyals.length === 1 &&
-    (nonRoyals[0].id === 'bishop' || nonRoyals[0].id === 'knight')
-  ) {
+  if (nonRoyals.length === 1 && (nonRoyals[0].id === 'bishop' || nonRoyals[0].id === 'knight')) {
     return true;
   }
   return false;
 }
 
 export function evaluateGameStatus(state: GameState, registry: PieceRegistry): GameState {
-  const { tiles, grid, turn, boardDef } = state;
+  let { tiles, grid, turn, boardDef, players, eliminatedPlayers } = state;
   const rules = getBoardRules(boardDef);
   const rows = tiles.length;
   const cols = tiles[0].length;
+  const lastMove = state.moveHistory[state.moveHistory.length - 1];
 
-  let whiteCount = 0;
-  let blackCount = 0;
-  let turnHasRoyal = false;
+  // Count pieces & royals per player, and check Summit / King of the Hill
+  const pieceCounts = emptyColorMap(() => 0);
+  const royalCounts = emptyColorMap(() => 0);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const p = grid[r][c];
       if (!p) continue;
-      if (p.color === 'white') whiteCount++;
-      else blackCount++;
-      if (p.color === turn && registry[p.pieceId]?.rules.royal) {
-        turnHasRoyal = true;
-      }
-
-      // Summit tile or King of the Hill win condition
-      if (registry[p.pieceId]?.rules.royal) {
+      pieceCounts[p.color]++;
+      const isRoyal = Boolean(registry[p.pieceId]?.rules.royal);
+      if (isRoyal) {
+        royalCounts[p.color]++;
         if (tiles[r][c].rule === 'summit') {
           return {
             ...state,
-            status: p.color === 'white' ? 'victory_white' : 'victory_black',
+            status: 'victory',
             winner: p.color,
-            statusReason: `Summit Claimed! ${p.color === 'white' ? 'White' : 'Black'}'s Royal reached the Crown Summit.`,
+            statusReason: `Summit Claimed! ${COLOR_LABELS[p.color]}'s Royal reached the Crown Summit.`,
           };
         }
         if (rules.winCondition === 'king_of_the_hill') {
@@ -842,9 +934,9 @@ export function evaluateGameStatus(state: GameState, registry: PieceRegistry): G
           if (tiles[r][c].rule === 'sanctuary' || isCenter) {
             return {
               ...state,
-              status: p.color === 'white' ? 'victory_white' : 'victory_black',
+              status: 'victory',
               winner: p.color,
-              statusReason: `King of the Hill! ${p.color === 'white' ? 'White' : 'Black'}'s Royal claimed the summit.`,
+              statusReason: `King of the Hill! ${COLOR_LABELS[p.color]}'s Royal claimed the center.`,
             };
           }
         }
@@ -852,20 +944,87 @@ export function evaluateGameStatus(state: GameState, registry: PieceRegistry): G
     }
   }
 
-  if (whiteCount === 0) {
-    return { ...state, status: 'victory_black', winner: 'black', statusReason: 'All White pieces eliminated.' };
-  }
-  if (blackCount === 0) {
-    return { ...state, status: 'victory_white', winner: 'white', statusReason: 'All Black pieces eliminated.' };
+  // Race to Promote win condition
+  if (rules.winCondition === 'race_to_promote' && lastMove?.promotedTo) {
+    // The player who just moved is the previous active color
+    const prevIdx = (players.indexOf(turn) - 1 + players.length) % players.length;
+    const mover = players[prevIdx];
+    return {
+      ...state,
+      status: 'victory',
+      winner: mover,
+      statusReason: `Promotion Race! ${COLOR_LABELS[mover]} promoted first and wins.`,
+    };
   }
 
-  // Draw rules: 50-move rule, threefold repetition, insufficient material
+  // Three-Check win condition
+  if (rules.winCondition === 'three_check') {
+    for (const col of players) {
+      if (state.checksDelivered[col] >= 3) {
+        return {
+          ...state,
+          status: 'victory',
+          winner: col,
+          statusReason: `Three-Check Victory! ${COLOR_LABELS[col]} delivered 3 checks.`,
+        };
+      }
+    }
+  }
+
+  // Antichess / Losing Chess: first active player with 0 pieces wins!
+  if (rules.winCondition === 'antichess') {
+    for (const col of players) {
+      if (!eliminatedPlayers.includes(col) && pieceCounts[col] === 0) {
+        return {
+          ...state,
+          status: 'victory',
+          winner: col,
+          statusReason: `Antichess Victory! ${COLOR_LABELS[col]} lost all pieces first.`,
+        };
+      }
+    }
+  }
+
+  // Check for eliminated players (0 pieces, or 0 royals in capture_the_king)
+  const nextEliminated = [...eliminatedPlayers];
+  for (const col of players) {
+    if (nextEliminated.includes(col)) continue;
+    const lostAll = pieceCounts[col] === 0;
+    const lostKing = rules.winCondition === 'capture_the_king' && royalCounts[col] === 0;
+    if (lostAll || lostKing) {
+      nextEliminated.push(col);
+      if (lostKing) {
+        grid = clearPlayerPieces(grid, col);
+      }
+    }
+  }
+
+  const remaining = players.filter((c) => !nextEliminated.includes(c));
+  if (remaining.length === 1) {
+    return {
+      ...state,
+      grid,
+      eliminatedPlayers: nextEliminated,
+      status: 'victory',
+      winner: remaining[0],
+      statusReason: `${COLOR_LABELS[remaining[0]]} is the last player standing!`,
+    };
+  }
+
+  if (nextEliminated.includes(turn)) {
+    turn = nextActiveColor(turn, players, nextEliminated);
+  }
+
+  // Draw rules (in 2-player games or when remaining === 2)
   if (rules.drawByFiftyMove && state.halfMoveClock >= 100) {
     return {
       ...state,
+      grid,
+      turn,
+      eliminatedPlayers: nextEliminated,
       status: 'draw',
       winner: undefined,
-      statusReason: 'Draw by 50-move rule (no capture or pawn advance in 50 moves).',
+      statusReason: 'Draw by 50-move rule.',
     };
   }
 
@@ -874,6 +1033,9 @@ export function evaluateGameStatus(state: GameState, registry: PieceRegistry): G
     if ((state.positionCounts[hash] ?? 0) >= 3) {
       return {
         ...state,
+        grid,
+        turn,
+        eliminatedPlayers: nextEliminated,
         status: 'draw',
         winner: undefined,
         statusReason: 'Draw by threefold repetition.',
@@ -881,50 +1043,116 @@ export function evaluateGameStatus(state: GameState, registry: PieceRegistry): G
     }
   }
 
-  if (rules.drawByInsufficientMaterial && rules.winCondition === 'checkmate' && isInsufficientMaterial(grid, registry)) {
+  if (
+    remaining.length === 2 &&
+    rules.drawByInsufficientMaterial &&
+    rules.winCondition === 'checkmate' &&
+    isInsufficientMaterial(grid, registry)
+  ) {
     return {
       ...state,
+      grid,
+      turn,
+      eliminatedPlayers: nextEliminated,
       status: 'draw',
       winner: undefined,
       statusReason: 'Draw by insufficient checkmating material.',
     };
   }
 
-  const legalMoves = generateLegalMoves(tiles, grid, turn, registry, rules, state.enPassantTarget);
+  const legalMoves = generateLegalMoves(
+    tiles,
+    grid,
+    turn,
+    registry,
+    rules,
+    state.enPassantTarget,
+    state.lostByColor
+  );
   const inCheck = isColorInCheck(tiles, grid, turn, registry, rules);
 
   if (legalMoves.length === 0) {
-    if (inCheck && rules.winCondition !== 'annihilation') {
-      const winner = oppositeColor(turn);
+    if (rules.winCondition === 'antichess') {
       return {
         ...state,
-        status: 'checkmate',
-        winner,
-        statusReason: `Checkmate! ${winner === 'white' ? 'White' : 'Black'} wins.`,
+        grid,
+        turn,
+        eliminatedPlayers: nextEliminated,
+        status: 'victory',
+        winner: turn,
+        statusReason: `Antichess Victory! ${COLOR_LABELS[turn]} has no legal moves left.`,
       };
     }
-    if (!turnHasRoyal || rules.winCondition === 'annihilation') {
-      const winner = oppositeColor(turn);
+
+    if (remaining.length > 2) {
+      // In 3P/4P games, a player with no legal moves is eliminated and play continues!
+      const updatedElim = [...nextEliminated, turn];
+      const clearedGrid = clearPlayerPieces(grid, turn);
+      const stillAlive = players.filter((c) => !updatedElim.includes(c));
+      if (stillAlive.length === 1) {
+        return {
+          ...state,
+          grid: clearedGrid,
+          eliminatedPlayers: updatedElim,
+          status: 'victory',
+          winner: stillAlive[0],
+          statusReason: `${COLOR_LABELS[stillAlive[0]]} wins — all rivals eliminated!`,
+        };
+      }
+      return evaluateGameStatus(
+        {
+          ...state,
+          grid: clearedGrid,
+          eliminatedPlayers: updatedElim,
+          turn: nextActiveColor(turn, players, updatedElim),
+        },
+        registry
+      );
+    }
+
+    // 2 remaining players
+    const opponent = remaining.find((c) => c !== turn)!;
+    if (inCheck) {
       return {
         ...state,
-        status: winner === 'white' ? 'victory_white' : 'victory_black',
-        winner,
-        statusReason: `${turn === 'white' ? 'White' : 'Black'} has no legal moves.`,
+        grid,
+        turn,
+        eliminatedPlayers: nextEliminated,
+        status: 'checkmate',
+        winner: opponent,
+        statusReason: `Checkmate! ${COLOR_LABELS[opponent]} wins.`,
+      };
+    }
+    if (royalCounts[turn] === 0 || rules.winCondition === 'annihilation') {
+      return {
+        ...state,
+        grid,
+        turn,
+        eliminatedPlayers: nextEliminated,
+        status: 'victory',
+        winner: opponent,
+        statusReason: `${COLOR_LABELS[turn]} has no legal moves. ${COLOR_LABELS[opponent]} wins.`,
       };
     }
     return {
       ...state,
+      grid,
+      turn,
+      eliminatedPlayers: nextEliminated,
       status: 'stalemate',
       winner: undefined,
-      statusReason: `Stalemate — ${turn === 'white' ? 'White' : 'Black'} has no legal moves and is not in check.`,
+      statusReason: `Stalemate — ${COLOR_LABELS[turn]} has no legal moves and is not in check.`,
     };
   }
 
   return {
     ...state,
+    grid,
+    turn,
+    eliminatedPlayers: nextEliminated,
     status: inCheck ? 'check' : 'playing',
     winner: undefined,
-    statusReason: inCheck ? `${turn === 'white' ? 'White' : 'Black'} is in check!` : undefined,
+    statusReason: inCheck ? `${COLOR_LABELS[turn]} is in check!` : undefined,
   };
 }
 
@@ -933,33 +1161,53 @@ export function makeGameMove(
   move: Move,
   registry: PieceRegistry
 ): GameState {
+  const rules = getBoardRules(state.boardDef);
   const movingPiece = state.grid[move.from.r]?.[move.from.c];
   const movingDef = movingPiece ? registry[movingPiece.pieceId] : undefined;
   const { tiles, grid, blastCaptures } = applyMoveToBoard(state.tiles, state.grid, move, registry);
 
-  const capturedByWhite = [...state.capturedByWhite];
-  const capturedByBlack = [...state.capturedByBlack];
+  const capturedByColor: Record<Color, PlacedPiece[]> = {
+    white: [...state.capturedByColor.white],
+    black: [...state.capturedByColor.black],
+    red: [...state.capturedByColor.red],
+    blue: [...state.capturedByColor.blue],
+  };
+  const lostByColor: Record<Color, PlacedPiece[]> = {
+    white: [...state.lostByColor.white],
+    black: [...state.lostByColor.black],
+    red: [...state.lostByColor.red],
+    blue: [...state.lostByColor.blue],
+  };
+
   if (move.captured) {
-    if (state.turn === 'white') capturedByWhite.push(move.captured);
-    else capturedByBlack.push(move.captured);
+    capturedByColor[state.turn].push(move.captured);
+    lostByColor[move.captured.color].push(move.captured);
   }
   for (const bc of blastCaptures) {
-    if (bc.color === 'black') capturedByWhite.push(bc);
-    else capturedByBlack.push(bc);
+    lostByColor[bc.color].push(bc);
+    if (bc.color !== state.turn) {
+      capturedByColor[state.turn].push(bc);
+    }
   }
 
-  // Compute En Passant target if this was a 2-step double push
   let nextEnPassant: GameState['enPassantTarget'] = null;
   if (move.isDoubleStep && movingPiece && (movingDef?.rules.enPassant || movingDef?.rules.pawnDoubleStep)) {
     const midR = Math.round((move.from.r + move.to.r) / 2);
+    const midC = Math.round((move.from.c + move.to.c) / 2);
     nextEnPassant = {
-      targetSquare: { r: midR, c: move.from.c },
+      targetSquare: { r: midR, c: midC },
       pawnSquare: move.portalExit ?? move.to,
       pawnColor: state.turn,
     };
   }
 
-  const nextTurn = oppositeColor(state.turn);
+  // Track checks delivered for Three-Check win condition
+  const checksDelivered = { ...state.checksDelivered };
+  const nextTurn = nextActiveColor(state.turn, state.players, state.eliminatedPlayers);
+  if (isColorInCheck(tiles, grid, nextTurn, registry, rules)) {
+    checksDelivered[state.turn] = (checksDelivered[state.turn] ?? 0) + 1;
+  }
+
   const nextHash = computePositionHash(grid, nextTurn, nextEnPassant);
   const nextCounts = {
     ...state.positionCounts,
@@ -974,8 +1222,9 @@ export function makeGameMove(
     grid,
     turn: nextTurn,
     moveHistory: [...state.moveHistory, move],
-    capturedByWhite,
-    capturedByBlack,
+    capturedByColor,
+    lostByColor,
+    checksDelivered,
     halfMoveClock: resetClock ? 0 : state.halfMoveClock + 1,
     enPassantTarget: nextEnPassant,
     positionCounts: nextCounts,

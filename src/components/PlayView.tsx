@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
-  Brain,
+  Bot,
   Copy,
   Crown,
   Download,
@@ -15,17 +15,21 @@ import {
   Swords,
   Trophy,
   Undo2,
-  Users,
+  User,
+  X,
 } from 'lucide-react';
 import {
   AdventureNode,
   AIDifficulty,
   BoardDefinition,
   BoardGraphAnalysis,
+  Color,
+  COLOR_LABELS,
   Coord,
   GameState,
   Move,
   PieceDefinition,
+  PlayerControl,
   UIPreferences,
 } from '../engine/types';
 import {
@@ -62,6 +66,13 @@ interface PlayViewProps {
 
 type RightTab = 'moves' | 'guide' | 'ai';
 
+const TEAM_DOT: Record<Color, string> = {
+  white: 'bg-[#f8f1df] border-amber-400',
+  black: 'bg-[#262120] border-amber-300',
+  red: 'bg-red-600 border-red-300',
+  blue: 'bg-blue-600 border-blue-300',
+};
+
 export const PlayView: React.FC<PlayViewProps> = ({
   boards,
   activeBoard,
@@ -80,7 +91,12 @@ export const PlayView: React.FC<PlayViewProps> = ({
   ]);
   const [selected, setSelected] = useState<Coord | null>(null);
   const [pendingPromotionMoves, setPendingPromotionMoves] = useState<Move[] | null>(null);
-  const [vsAI, setVsAI] = useState(true);
+  const [playerControls, setPlayerControls] = useState<Record<Color, PlayerControl>>({
+    white: 'human',
+    black: 'ai',
+    red: 'ai',
+    blue: 'ai',
+  });
   const [difficulty, setDifficulty] = useState<AIDifficulty>(
     activeAdventureNode?.aiDifficulty ?? 'tactician'
   );
@@ -105,7 +121,6 @@ export const PlayView: React.FC<PlayViewProps> = ({
       ? gameState.boardDef.theme ?? 'classic'
       : uiPrefs.boardThemeOverride;
 
-  // Reset when activeBoard changes
   useEffect(() => {
     setHistoryStates([createInitialGameState(activeBoard, registry)]);
     setSelected(null);
@@ -114,7 +129,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
     setAiStats(null);
     setVictoryClaimed(false);
     if (activeAdventureNode) {
-      setVsAI(true);
+      setPlayerControls({ white: 'human', black: 'ai', red: 'ai', blue: 'ai' });
       setDifficulty(activeAdventureNode.aiDifficulty);
     }
   }, [activeBoard, registry, activeAdventureNode]);
@@ -145,7 +160,8 @@ export const PlayView: React.FC<PlayViewProps> = ({
             gameState.turn,
             registry,
             boardRules,
-            gameState.enPassantTarget
+            gameState.enPassantTarget,
+            gameState.lostByColor
           )
         : [],
     [gameState, registry, boardRules]
@@ -157,17 +173,24 @@ export const PlayView: React.FC<PlayViewProps> = ({
   }, [selected, allLegalMoves]);
 
   const liveEvalCp = useMemo(() => {
-    if (aiStats) return aiStats.evalCp;
-    return evaluatePosition(gameState.tiles, gameState.grid, graphAnalysis, registry);
-  }, [aiStats, gameState.tiles, gameState.grid, graphAnalysis, registry]);
+    if (aiStats && gameState.players.length === 2) return aiStats.evalCp;
+    return evaluatePosition(
+      gameState.tiles,
+      gameState.grid,
+      graphAnalysis,
+      registry,
+      'white',
+      boardRules.winCondition === 'antichess'
+    );
+  }, [aiStats, gameState, graphAnalysis, registry, boardRules.winCondition]);
 
-  // Notify Adventure Mode on White victory
+  // Adventure victory hook
   useEffect(() => {
     if (
       activeAdventureNode &&
       !victoryClaimed &&
       gameState.winner === 'white' &&
-      (gameState.status === 'checkmate' || gameState.status === 'victory_white')
+      (gameState.status === 'checkmate' || gameState.status === 'victory')
     ) {
       setVictoryClaimed(true);
       soundEngine.playVictory();
@@ -175,11 +198,11 @@ export const PlayView: React.FC<PlayViewProps> = ({
     }
   }, [activeAdventureNode, victoryClaimed, gameState.winner, gameState.status, onAdventureVictory]);
 
-  // AI Turn trigger (AI plays Black)
+  // AI Turn trigger (any active player set to 'ai')
+  const isCurrentTurnAI = playerControls[gameState.turn] === 'ai';
   useEffect(() => {
-    if (!vsAI) return;
+    if (!isCurrentTurnAI) return;
     if (pendingPromotionMoves) return;
-    if (gameState.turn !== 'black') return;
     if (gameState.status !== 'playing' && gameState.status !== 'check') return;
 
     setAiThinking(true);
@@ -199,14 +222,10 @@ export const PlayView: React.FC<PlayViewProps> = ({
     }, 180);
 
     return () => window.clearTimeout(timer);
-  }, [vsAI, pendingPromotionMoves, gameState, difficulty, registry, graphAnalysis]);
+  }, [isCurrentTurnAI, pendingPromotionMoves, gameState, difficulty, registry, graphAnalysis]);
 
   function playMoveSound(move: Move, nextState: GameState) {
-    if (
-      nextState.status === 'checkmate' ||
-      nextState.status === 'victory_white' ||
-      nextState.status === 'victory_black'
-    ) {
+    if (nextState.status === 'checkmate' || nextState.status === 'victory') {
       soundEngine.playVictory();
     } else if (nextState.status === 'check') {
       soundEngine.playCheck();
@@ -230,14 +249,12 @@ export const PlayView: React.FC<PlayViewProps> = ({
   }
 
   function handleSquareClick(r: number, c: number) {
-    if (aiThinking || pendingPromotionMoves) return;
+    if (aiThinking || pendingPromotionMoves || isCurrentTurnAI) return;
     if (gameState.status !== 'playing' && gameState.status !== 'check') return;
-    if (vsAI && gameState.turn === 'black') return;
 
     if (selected) {
       const matchingMoves = selectedLegalMoves.filter((m) => m.to.r === r && m.to.c === c);
       if (matchingMoves.length > 1) {
-        // Multiple promotion options -> open Promotion Picker modal!
         setPendingPromotionMoves(matchingMoves);
         return;
       }
@@ -259,10 +276,13 @@ export const PlayView: React.FC<PlayViewProps> = ({
   }
 
   function handleUndo() {
-    if (aiThinking) return;
-    if (historyStates.length <= 1) return;
-    const stepsBack = vsAI && gameState.turn === 'white' && historyStates.length >= 3 ? 2 : 1;
-    setHistoryStates((prev) => prev.slice(0, Math.max(1, prev.length - stepsBack)));
+    if (aiThinking || historyStates.length <= 1) return;
+    // Step back to the previous human turn if possible
+    let targetIdx = historyStates.length - 2;
+    while (targetIdx > 0 && playerControls[historyStates[targetIdx].turn] === 'ai') {
+      targetIdx--;
+    }
+    setHistoryStates((prev) => prev.slice(0, Math.max(1, targetIdx + 1)));
     setSelected(null);
     setPendingPromotionMoves(null);
   }
@@ -277,14 +297,16 @@ export const PlayView: React.FC<PlayViewProps> = ({
 
   function handleResign() {
     if (gameState.status !== 'playing' && gameState.status !== 'check') return;
-    const winner = gameState.turn === 'white' ? 'black' : 'white';
+    const remaining = gameState.players.filter(
+      (c) => c !== gameState.turn && !gameState.eliminatedPlayers.includes(c)
+    );
     setHistoryStates((prev) => [
       ...prev,
       {
         ...gameState,
-        status: winner === 'white' ? 'victory_white' : 'victory_black',
-        winner,
-        statusReason: `${gameState.turn === 'white' ? 'White' : 'Black'} resigned.`,
+        status: 'victory',
+        winner: remaining[0],
+        statusReason: `${COLOR_LABELS[gameState.turn]} resigned.`,
       },
     ]);
   }
@@ -310,13 +332,11 @@ export const PlayView: React.FC<PlayViewProps> = ({
   const activeHeatmap = useMemo(() => {
     if (!showHeatmap) return null;
     const metrics = graphAnalysis.metricsByPiece[heatmapPieceId];
-    if (!metrics) return null;
-    return gameState.turn === 'black' ? metrics.pstBlack : metrics.pstWhite;
+    return metrics?.pstByColor[gameState.turn] ?? null;
   }, [showHeatmap, graphAnalysis, heatmapPieceId, gameState.turn]);
 
   const whiteBarPct = Math.max(5, Math.min(95, 50 + Math.tanh(liveEvalCp / 600) * 45));
-  const isGameOver =
-    gameState.status !== 'playing' && gameState.status !== 'check';
+  const isGameOver = gameState.status !== 'playing' && gameState.status !== 'check';
 
   const shareCode = useMemo(
     () => (showShareModal ? encodeBoardShareCode(activeBoard, allPieces) : ''),
@@ -327,30 +347,9 @@ export const PlayView: React.FC<PlayViewProps> = ({
     ? registry[gameState.grid[selected.r]?.[selected.c]?.pieceId ?? '']
     : null;
 
-  const renderCapturedRow = (pieces: import('../engine/types').PlacedPiece[], label: string) => (
-    <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#19130e]/85 border border-amber-500/15 min-h-[34px]">
-      <span className="text-[11px] font-medium text-stone-400">{label}</span>
-      <div className="flex items-center gap-0.5 flex-wrap justify-end">
-        {pieces.length === 0 ? (
-          <span className="text-[11px] text-stone-600 italic">None</span>
-        ) : (
-          pieces.map((p, i) => {
-            const def = registry[p.pieceId];
-            if (!def) return null;
-            return (
-              <span key={`${p.id}_${i}`} className="w-5 h-5 inline-block" title={def.name}>
-                <PieceIcon icon={def.icon} color={p.color} rules={def.rules} palette={uiPrefs.piecePalette} />
-              </span>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      {/* Left Column: Match Setup & Controls */}
+      {/* Left Column: Match Setup, Multi-Player Roster & Controls */}
       <div className="lg:col-span-3 space-y-4 order-2 lg:order-1">
         {activeAdventureNode && (
           <div className="parchment-panel rounded-xl p-4 border-amber-500/40 bg-amber-950/20">
@@ -397,42 +396,88 @@ export const PlayView: React.FC<PlayViewProps> = ({
             >
               {boards.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.name} ({b.rows}×{b.cols}){b.isBuiltin ? '' : ' ★'}
+                  {b.name} ({b.rows}x{b.cols}){b.players && b.players.length > 2 ? ` [${b.players.length}P]` : ''}
                 </option>
               ))}
             </select>
             <p className="text-xs text-stone-300 leading-relaxed pt-1">{activeBoard.description}</p>
           </div>
 
-          {/* Opponent Mode */}
-          <div className="pt-2 border-t border-amber-500/15 space-y-2.5">
-            <div className="grid grid-cols-2 gap-2">
+          {/* Multi-Player Roster (Human / AI per color) */}
+          <div className="pt-2 border-t border-amber-500/15 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] uppercase tracking-wider text-stone-400">
+                Players ({gameState.players.length}P)
+              </span>
               <button
                 type="button"
-                onClick={() => setVsAI(true)}
-                className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  vsAI
-                    ? 'bg-amber-600 text-stone-950 shadow'
-                    : 'bg-[#1b1510] text-stone-300 border border-amber-500/20 hover:border-amber-500/40'
-                }`}
+                onClick={() =>
+                  setPlayerControls({ white: 'human', black: 'human', red: 'human', blue: 'human' })
+                }
+                className="text-[11px] text-amber-400 hover:text-amber-300 cursor-pointer"
               >
-                <Brain className="w-3.5 h-3.5" /> vs Graph AI
-              </button>
-              <button
-                type="button"
-                onClick={() => setVsAI(false)}
-                className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  !vsAI
-                    ? 'bg-amber-600 text-stone-950 shadow'
-                    : 'bg-[#1b1510] text-stone-300 border border-amber-500/20 hover:border-amber-500/40'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" /> 2P Local
+                All Human
               </button>
             </div>
+            <div className="space-y-1.5">
+              {gameState.players.map((col) => {
+                const ctrl = playerControls[col];
+                const isTurn = gameState.turn === col && !isGameOver;
+                const isElim = gameState.eliminatedPlayers.includes(col);
+                return (
+                  <div
+                    key={col}
+                    className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs ${
+                      isTurn
+                        ? 'bg-amber-500/20 border-amber-400'
+                        : isElim
+                          ? 'bg-[#14100c] border-stone-800 opacity-45'
+                          : 'bg-[#19130e] border-amber-500/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`w-3 h-3 rounded-full border ${TEAM_DOT[col]}`} />
+                      <span className="font-semibold text-amber-100">{COLOR_LABELS[col]}</span>
+                      {boardRules.winCondition === 'three_check' && (
+                        <span className="text-[10px] font-mono text-amber-300">
+                          ({gameState.checksDelivered[col]}/3)
+                        </span>
+                      )}
+                      {isElim && (
+                        <span className="text-[10px] font-mono text-rose-400">OUT</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPlayerControls((prev) => ({
+                          ...prev,
+                          [col]: prev[col] === 'human' ? 'ai' : 'human',
+                        }))
+                      }
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${
+                        ctrl === 'human'
+                          ? 'bg-amber-600 text-stone-950'
+                          : 'bg-[#241c14] text-sky-300 border border-sky-500/30'
+                      }`}
+                    >
+                      {ctrl === 'human' ? (
+                        <>
+                          <User className="w-3 h-3" /> Human
+                        </>
+                      ) : (
+                        <>
+                          <Bot className="w-3 h-3" /> AI
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
 
-            {vsAI && (
-              <div className="space-y-1">
+            {gameState.players.some((c) => playerControls[c] === 'ai') && (
+              <div className="space-y-1 pt-1">
                 <span className="text-[11px] uppercase tracking-wider text-stone-400">
                   AI Strength
                 </span>
@@ -518,31 +563,24 @@ export const PlayView: React.FC<PlayViewProps> = ({
         </div>
       </div>
 
-      {/* Center Column: Status Banner, Captured Pieces, Interactive Board */}
+      {/* Center Column: Status Banner, Board, Captured Trays */}
       <div className="lg:col-span-6 space-y-2.5 order-1 lg:order-2">
-        {/* Turn & Evaluation Bar */}
         <div className="parchment-panel rounded-xl px-4 py-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <span
-                className={`w-3.5 h-3.5 rounded-full border-2 ${
-                  gameState.turn === 'white'
-                    ? 'bg-[#f8f1df] border-amber-400'
-                    : 'bg-[#262120] border-amber-300'
-                }`}
-              />
+              <span className={`w-3.5 h-3.5 rounded-full border-2 ${TEAM_DOT[gameState.turn]}`} />
               <span className="font-display font-bold text-sm sm:text-base text-amber-100">
                 {isGameOver
                   ? gameState.status === 'stalemate'
                     ? 'Stalemate — Draw'
                     : gameState.status === 'draw'
                       ? 'Draw'
-                      : gameState.winner === 'white'
-                        ? 'White Wins!'
-                        : 'Black Wins!'
+                      : gameState.winner
+                        ? `${COLOR_LABELS[gameState.winner]} Wins!`
+                        : 'Game Over'
                   : aiThinking
-                    ? 'Graph AI is thinking…'
-                    : `${gameState.turn === 'white' ? 'White' : 'Black'} to move`}
+                    ? `${COLOR_LABELS[gameState.turn]} AI is thinking...`
+                    : `${COLOR_LABELS[gameState.turn]} to move`}
               </span>
               {gameState.status === 'check' && (
                 <span className="px-2 py-0.5 rounded-full bg-rose-600/90 text-white text-xs font-bold animate-pulse">
@@ -580,13 +618,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
           )}
         </div>
 
-        {/* Captured by Black (top) */}
-        {renderCapturedRow(
-          flipped ? gameState.capturedByWhite : gameState.capturedByBlack,
-          flipped ? 'Captured by White' : 'Captured by Black'
-        )}
-
-        {/* Interactive Board */}
+        {/* Interactive Board + Promotion Modal */}
         <div className="relative">
           <ChessBoardView
             rows={gameState.boardDef.rows}
@@ -611,13 +643,12 @@ export const PlayView: React.FC<PlayViewProps> = ({
             onSquareClick={handleSquareClick}
           />
 
-          {/* Promotion Choice Modal */}
           {pendingPromotionMoves && (
             <div className="absolute inset-0 z-30 bg-black/75 backdrop-blur-sm rounded-xl flex items-center justify-center p-4">
               <div className="parchment-panel rounded-2xl p-5 max-w-sm w-full space-y-4 border-amber-400/60 shadow-2xl">
                 <div className="text-center space-y-1">
                   <div className="inline-flex items-center gap-1.5 text-amber-400 text-xs font-bold uppercase tracking-wider">
-                    <Crown className="w-4 h-4" /> Promotion!
+                    <Crown className="w-4 h-4" /> Promotion
                   </div>
                   <h4 className="font-display text-lg font-bold text-amber-100">
                     Choose Your Promotion Piece
@@ -642,6 +673,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
                             color={gameState.turn}
                             rules={def.rules}
                             palette={uiPrefs.piecePalette}
+                            customAppearance={def.customAppearance}
                           />
                         </span>
                         <div className="min-w-0">
@@ -664,11 +696,44 @@ export const PlayView: React.FC<PlayViewProps> = ({
           )}
         </div>
 
-        {/* Captured by White (bottom) */}
-        {renderCapturedRow(
-          flipped ? gameState.capturedByBlack : gameState.capturedByWhite,
-          flipped ? 'Captured by Black' : 'Captured by White'
-        )}
+        {/* Captured Pieces Grid for all active players */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {gameState.players.map((col) => {
+            const caps = gameState.capturedByColor[col] ?? [];
+            return (
+              <div
+                key={col}
+                className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#19130e]/85 border border-amber-500/15 min-h-[34px]"
+              >
+                <span className="text-[11px] font-medium text-stone-400 flex items-center gap-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full border ${TEAM_DOT[col]}`} />
+                  {COLOR_LABELS[col]} Captures
+                </span>
+                <div className="flex items-center gap-0.5 flex-wrap justify-end">
+                  {caps.length === 0 ? (
+                    <span className="text-[11px] text-stone-600 italic">None</span>
+                  ) : (
+                    caps.map((p, i) => {
+                      const def = registry[p.pieceId];
+                      if (!def) return null;
+                      return (
+                        <span key={`${p.id}_${i}`} className="w-5 h-5 inline-block" title={def.name}>
+                          <PieceIcon
+                            icon={def.icon}
+                            color={p.color}
+                            rules={def.rules}
+                            palette={uiPrefs.piecePalette}
+                            customAppearance={def.customAppearance}
+                          />
+                        </span>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Right Column: Clean 3-Tab Inspector (Moves | Guide | AI Brain) */}
@@ -699,27 +764,32 @@ export const PlayView: React.FC<PlayViewProps> = ({
         <div className="p-4 space-y-4">
           {rightTab === 'moves' && (
             <>
-              {/* Active Rules Summary */}
               <div className="rounded-xl bg-[#18120d] border border-amber-500/15 p-3 space-y-1.5">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
-                  Active Board Rules
+                  Active Rules
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-200 capitalize">
+                    Win: {boardRules.winCondition.replace(/_/g, ' ')}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-sky-500/15 text-sky-200 capitalize">
+                    Promo: {boardRules.promotionMode.replace(/_/g, ' ')}
+                  </span>
                   {boardRules.castlingEnabled && (
                     <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-200">Castling</span>
                   )}
                   {boardRules.enPassantEnabled && (
                     <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-200">En Passant</span>
                   )}
-                  {boardRules.drawByRepetition && (
-                    <span className="px-2 py-0.5 rounded bg-stone-700/60 text-stone-200">3-Fold Draw</span>
+                  {boardRules.mandatoryCapture && (
+                    <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-200">Forced Captures</span>
                   )}
-                  {boardRules.drawByFiftyMove && (
-                    <span className="px-2 py-0.5 rounded bg-stone-700/60 text-stone-200">50-Move Draw</span>
+                  {boardRules.promoteOnCapture && (
+                    <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-200">Promo on Capture</span>
                   )}
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-200 capitalize">
-                    Win: {boardRules.winCondition.replace(/_/g, ' ')}
-                  </span>
+                  {boardRules.friendlyFire && (
+                    <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-200">Friendly Fire</span>
+                  )}
                 </div>
               </div>
 
@@ -729,7 +799,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
                 </div>
                 {gameState.moveHistory.length === 0 ? (
                   <p className="text-xs text-stone-400 italic">
-                    Click any White piece to see its legal moves, including Castling (⇄) and En Passant (EP).
+                    Click any piece belonging to the active player to see legal moves.
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 gap-1 max-h-80 overflow-y-auto font-mono text-xs pr-1">
@@ -740,9 +810,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
                           idx % 2 === 0 ? 'bg-[#1f1812] text-amber-100' : 'bg-[#16110d] text-stone-300'
                         }`}
                       >
-                        <span className="text-stone-500 mr-1.5">
-                          {idx % 2 === 0 ? `${Math.floor(idx / 2) + 1}.` : ''}
-                        </span>
+                        <span className="text-stone-500 mr-1.5">{idx + 1}.</span>
                         {m.notation}
                       </div>
                     ))}
@@ -763,6 +831,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
                         color={gameState.grid[selected!.r]?.[selected!.c]?.color ?? 'white'}
                         rules={selectedPieceDef.rules}
                         palette={uiPrefs.piecePalette}
+                        customAppearance={selectedPieceDef.customAppearance}
                       />
                     </div>
                     <div>
@@ -779,26 +848,26 @@ export const PlayView: React.FC<PlayViewProps> = ({
                 </div>
               ) : (
                 <p className="text-xs text-stone-400 italic">
-                  Select any piece on the board to inspect its movement rules and abilities here.
+                  Select any piece on the board to inspect its movement rules here.
                 </p>
               )}
 
               <div className="space-y-2 text-xs text-stone-300">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
-                  Move &amp; Tile Symbols
+                  Board Badges &amp; Tile Rules
                 </div>
                 <ul className="space-y-1.5 text-[11px] leading-relaxed">
-                  <li><strong className="text-amber-200">⇄ Castling / Swap:</strong> Castle an unmoved King &amp; Rook, or swap with an ally (cyan).</li>
-                  <li><strong className="text-rose-300">EP En Passant:</strong> Capture a pawn that just double-stepped beside yours.</li>
-                  <li><strong className="text-amber-300">★ Promotion:</strong> Reach this tile to choose a new piece to promote into.</li>
-                  <li><strong className="text-amber-200">🛡 Sanctuary:</strong> Pieces standing here cannot be captured.</li>
-                  <li><strong className="text-sky-300">◎ Portal A/B/C:</strong> Warps arriving pieces to the matching portal tile.</li>
-                  <li><strong className="text-cyan-300">❄ Ice Slide:</strong> Pieces landing here glide 1 extra square forward.</li>
-                  <li><strong className="text-rose-400">⚠ Spike Trap:</strong> One-time hazard that destroys a non-Royal/non-Iron intruder.</li>
-                  <li><strong className="text-emerald-300">⚡ Power Boost:</strong> Grants +1 orthogonal step while standing on this rune.</li>
-                  <li><strong className="text-yellow-300">♛ Crown Summit:</strong> Reaching this tile with a Royal wins immediately!</li>
-                  <li><strong className="text-stone-300">🧱 Stone Wall:</strong> Blocks sliding pieces; leapers can jump over it.</li>
-                  <li><strong className="text-orange-300"># Fallow Tile:</strong> Crumbles into Void after its counter hits 0.</li>
+                  <li><strong className="font-mono text-amber-200">O-O / SWP:</strong> Castling move or Ally Position Swap.</li>
+                  <li><strong className="font-mono text-rose-300">EP:</strong> En Passant capture square.</li>
+                  <li><strong className="font-mono text-amber-300">PRO:</strong> Promotion zone (triggers promotion rule).</li>
+                  <li><strong className="font-mono text-amber-200">SAFE:</strong> Sanctuary tile — pieces here cannot be captured.</li>
+                  <li><strong className="font-mono text-sky-300">PA / PB / PC:</strong> Linked teleporter portals.</li>
+                  <li><strong className="font-mono text-cyan-300">ICE:</strong> Slippery tile — pieces glide 1 extra square.</li>
+                  <li><strong className="font-mono text-rose-400">TRAP:</strong> One-time hazard destroying non-Royal/non-Iron pieces.</li>
+                  <li><strong className="font-mono text-emerald-300">+1:</strong> Power Boost rune granting +1 orthogonal step.</li>
+                  <li><strong className="font-mono text-yellow-300">HILL:</strong> Crown Summit — reaching it with a Royal wins immediately.</li>
+                  <li><strong className="font-mono text-stone-300">WALL:</strong> Blocks sliding rays; leapers jump over it.</li>
+                  <li><strong className="font-mono text-orange-300">2x / 3x:</strong> Fallow tile — collapses into Void at 0.</li>
                 </ul>
               </div>
             </div>
@@ -822,7 +891,7 @@ export const PlayView: React.FC<PlayViewProps> = ({
               </div>
               <p className="text-[11px] text-stone-400 leading-relaxed">
                 Analyzed <span className="font-mono text-amber-300">{graphAnalysis.activeTileCount}</span> tiles in{' '}
-                <span className="font-mono text-amber-300">{graphAnalysis.computeTimeMs}ms</span>. Click any piece to view its dynamic Piece-Square Table on the board.
+                <span className="font-mono text-amber-300">{graphAnalysis.computeTimeMs}ms</span>. Click any piece to view its dynamic heatmap.
               </p>
 
               <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
@@ -847,7 +916,13 @@ export const PlayView: React.FC<PlayViewProps> = ({
                     >
                       <span className="flex items-center gap-2">
                         <span className="w-5 h-5 inline-block">
-                          <PieceIcon icon={def.icon} color="white" rules={def.rules} palette={uiPrefs.piecePalette} />
+                          <PieceIcon
+                            icon={def.icon}
+                            color="white"
+                            rules={def.rules}
+                            palette={uiPrefs.piecePalette}
+                            customAppearance={def.customAppearance}
+                          />
                         </span>
                         <span className="font-medium">{def.name}</span>
                       </span>
@@ -881,9 +956,10 @@ export const PlayView: React.FC<PlayViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowShareModal(false)}
-                className="text-stone-400 hover:text-white text-sm cursor-pointer"
+                className="text-stone-400 hover:text-white p-1 cursor-pointer"
+                aria-label="Close"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
             <div className="space-y-1.5">

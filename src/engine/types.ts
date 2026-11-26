@@ -1,4 +1,13 @@
-export type Color = 'white' | 'black';
+export type Color = 'white' | 'black' | 'red' | 'blue';
+
+export const ALL_COLORS: Color[] = ['white', 'black', 'red', 'blue'];
+
+export const COLOR_LABELS: Record<Color, string> = {
+  white: 'White',
+  black: 'Black',
+  red: 'Red',
+  blue: 'Blue',
+};
 
 export type Direction8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 
@@ -23,7 +32,7 @@ export type HopMode =
   | 'swap';
 
 export interface HopOffset {
-  /** Row delta from White's perspective (-1 = forward/up, +1 = backward/down). Flipped automatically for Black. */
+  /** Row delta from White's perspective (-1 = forward/up, +1 = backward/down). Rotated automatically for Black/Red/Blue. */
   dr: number;
   /** Column delta (-3..+3). */
   dc: number;
@@ -59,40 +68,26 @@ export type PieceCrestStyle = 'none' | 'halo' | 'crown' | 'horns' | 'flame' | 's
 
 export interface CustomPieceAppearance {
   mode: 'layered' | 'pixel';
-  /** Layered mode options */
   base: PieceBaseStyle;
   bodyIcon: PieceIconId;
   crest: PieceCrestStyle;
-  /** Custom colors (used for accent/tint; White vs Black still clearly distinguishable via rim/base) */
   primaryColor?: string;
   accentColor?: string;
   glowColor?: string;
-  /** Pixel painter mode: 9x9 grid of hex colors or empty string */
   pixels?: string[][];
 }
 
 export interface PieceRules {
-  /** Must be defended; can be put in check and checkmated. */
   royal?: boolean;
-  /** Cannot be captured by normal pieces (only by Blacksmith pieces). */
   iron?: boolean;
-  /** Can capture Iron pieces. */
   blacksmith?: boolean;
-  /** Captures enemy pieces from afar without moving onto their square. */
   rangedAttack?: boolean;
-  /** Allows a 2-step forward move on its first move (classic Pawn feel). */
   pawnDoubleStep?: boolean;
-  /** Can perform and be captured by En Passant after a 2-step move. */
   enPassant?: boolean;
-  /** Can initiate castling as the Royal piece. */
   castleKing?: boolean;
-  /** Can participate in castling as the Rook partner. */
   castleRook?: boolean;
-  /** Atomic/Explosive capture: destroys adjacent non-Royal pieces in a 3x3 blast. */
   explosive?: boolean;
-  /** Sliding rays can phase through friendly pieces. */
   phasing?: boolean;
-  /** Eligible to promote on Promotion Zones (defaults to true for non-Royals). */
   canPromote?: boolean;
 }
 
@@ -101,12 +96,9 @@ export interface PieceDefinition {
   name: string;
   shortCode: string;
   icon: PieceIconId;
-  /** Optional custom appearance forged in the Piece Appearance Creator. */
   customAppearance?: CustomPieceAppearance;
   description: string;
-  /** Relative hops in the 7x7 grid (dr, dc in -3..3) from White's perspective. */
   hops: HopOffset[];
-  /** Sliding rays in 8 directions (from White's perspective; N/S flipped for Black). */
   slides: SlideRanges;
   rules: PieceRules;
   isBuiltin?: boolean;
@@ -130,9 +122,9 @@ export type TileRuleType =
 export interface TileConfig {
   rule: TileRuleType;
   portalChannel?: PortalChannel;
-  /** Which color(s) can promote on this tile. */
-  promotionFor?: 'white' | 'black' | 'both';
-  /** Optional fixed piece ID to promote into. When omitted, player chooses from board's promotionPool! */
+  /** Which color(s) can promote on this tile ('both' / 'all' means any player). */
+  promotionFor?: Color | 'both' | 'all';
+  /** Optional fixed piece ID to promote into. */
   promoteToPieceId?: string;
   /** Remaining steps allowed on a fallow tile before it crumbles to void. */
   fallowUses?: number;
@@ -152,7 +144,20 @@ export type BoardFrameStyle = 'walnut' | 'gold' | 'steel' | 'minimal';
 
 export type PiecePalette = 'ivory' | 'royal_gold' | 'jade_ruby' | 'blueprint';
 
-export type WinCondition = 'checkmate' | 'king_of_the_hill' | 'annihilation';
+export type WinCondition =
+  | 'checkmate'
+  | 'king_of_the_hill'
+  | 'annihilation'
+  | 'three_check'
+  | 'capture_the_king'
+  | 'antichess'
+  | 'race_to_promote';
+
+export type PromotionRuleMode =
+  | 'player_choice'
+  | 'all_non_royal'
+  | 'captured_only'
+  | 'random_pool';
 
 export interface BoardRuleSettings {
   castlingEnabled: boolean;
@@ -160,8 +165,11 @@ export interface BoardRuleSettings {
   drawByRepetition: boolean;
   drawByFiftyMove: boolean;
   drawByInsufficientMaterial: boolean;
+  mandatoryCapture: boolean;
+  friendlyFire: boolean;
   winCondition: WinCondition;
-  /** Piece IDs the player can choose from when promoting. */
+  promotionMode: PromotionRuleMode;
+  promoteOnCapture: boolean;
   promotionPool: string[];
 }
 
@@ -171,13 +179,17 @@ export const DEFAULT_BOARD_RULES: BoardRuleSettings = {
   drawByRepetition: true,
   drawByFiftyMove: true,
   drawByInsufficientMaterial: true,
+  mandatoryCapture: false,
+  friendlyFire: false,
   winCondition: 'checkmate',
+  promotionMode: 'player_choice',
+  promoteOnCapture: false,
   promotionPool: ['queen', 'rook', 'bishop', 'knight'],
 };
 
 export interface PlacedPiece {
-  id: string; // unique instance id
-  pieceId: string; // references PieceDefinition.id
+  id: string;
+  pieceId: string;
   color: Color;
   hasMoved?: boolean;
 }
@@ -186,13 +198,12 @@ export interface BoardDefinition {
   id: string;
   name: string;
   description: string;
-  rows: number; // 4..16
-  cols: number; // 4..16
-  /** Indexed [r][c] */
+  rows: number;
+  cols: number;
+  /** Active players on this board (defaults to ['white', 'black']). */
+  players?: Color[];
   tiles: TileConfig[][];
-  /** Initial placement indexed [r][c] */
   initialPieces: (PlacedPiece | null)[][];
-  /** Custom piece definitions bundled with this board (for sharing/portability). */
   customPieces?: PieceDefinition[];
   difficulty?: 1 | 2 | 3;
   theme?: BoardTheme;
@@ -208,27 +219,19 @@ export interface Coord {
 export interface Move {
   from: Coord;
   to: Coord;
-  /** If a portal or ice tile moves the piece after landing on `to`, this is its final square. */
   portalExit?: Coord;
-  /** True when landing on an Ice tile caused an extra slide. */
   isIceSlide?: boolean;
-  /** True when a Ranged Attack captures on `to` while the attacker stays on `from`. */
   isRangedCapture?: boolean;
-  /** True when swapping positions with a friendly piece. */
   isSwap?: boolean;
-  /** Castling partner rook movement */
   castling?: {
     rookFrom: Coord;
     rookTo: Coord;
     side: 'kingside' | 'queenside';
   };
-  /** En passant capture square (where the captured pawn actually sits) */
   enPassantCaptureCoord?: Coord;
-  /** True when a pawn/piece performed a first-move double push (sets enPassantTarget on next state) */
   isDoubleStep?: boolean;
   captured?: PlacedPiece;
   promotedTo?: string;
-  /** When multiple promotion options exist on this square, UI opens the picker! */
   promotionOptions?: string[];
   notation: string;
 }
@@ -239,30 +242,33 @@ export type GameStatus =
   | 'checkmate'
   | 'stalemate'
   | 'draw'
-  | 'victory_white'
-  | 'victory_black';
+  | 'victory';
 
 export interface GameState {
   boardDef: BoardDefinition;
-  /** Live mutable-cloned tiles (fallow tiles decrement and crumble to void; traps disarm). */
   tiles: TileConfig[][];
-  /** Live pieces [r][c] */
   grid: (PlacedPiece | null)[][];
+  /** Active turn order of players on this board. */
+  players: Color[];
+  /** Eliminated players in 3P/4P games. */
+  eliminatedPlayers: Color[];
   turn: Color;
   moveHistory: Move[];
-  capturedByWhite: PlacedPiece[];
-  capturedByBlack: PlacedPiece[];
+  /** Captured pieces grouped by the color that lost them (for Captured-Only promotion & trays). */
+  capturedByColor: Record<Color, PlacedPiece[]>;
+  /** Pieces lost by each color. */
+  lostByColor: Record<Color, PlacedPiece[]>;
+  /** Checks delivered by each player (for Three-Check win condition). */
+  checksDelivered: Record<Color, number>;
   status: GameStatus;
   winner?: Color;
   statusReason?: string;
   halfMoveClock: number;
-  /** En passant target square available on the very next ply only. */
   enPassantTarget?: {
     targetSquare: Coord;
     pawnSquare: Coord;
     pawnColor: Color;
   } | null;
-  /** Position hash -> occurrence count for threefold repetition detection. */
   positionCounts: Record<string, number>;
 }
 
@@ -270,9 +276,7 @@ export interface GraphPieceMetrics {
   pieceId: string;
   materialValue: number;
   avgMobility: number;
-  /** Normalized 0..1 heatmap [r][c] per color. */
-  pstWhite: number[][];
-  pstBlack: number[][];
+  pstByColor: Record<Color, number[][]>;
 }
 
 export interface BoardGraphAnalysis {
@@ -285,6 +289,8 @@ export interface BoardGraphAnalysis {
 
 export type AIDifficulty = 'novice' | 'tactician' | 'grandmaster';
 
+export type PlayerControl = 'human' | 'ai';
+
 export interface AdventureNode {
   id: string;
   island: 'Academy Isle' | 'Iron Citadel' | 'Portal Archipelago' | 'Grandmaster Spire';
@@ -296,7 +302,6 @@ export interface AdventureNode {
   aiDifficulty: AIDifficulty;
   rewardXp: number;
   rewardGems: number;
-  /** Coordinates on the SVG island map (0..1000 x 0..560). */
   mapX: number;
   mapY: number;
   requires?: string[];

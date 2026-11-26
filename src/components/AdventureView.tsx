@@ -221,11 +221,11 @@ export const AdventureView: React.FC<AdventureViewProps> = ({
                     y={node.mapY + 5}
                     textAnchor="middle"
                     fill="#ffffff"
-                    fontSize="13"
+                    fontSize="12"
                     fontWeight="800"
                     fontFamily="JetBrains Mono, monospace"
                   >
-                    {completed ? '✓' : node.order}
+                    {completed ? 'OK' : node.order}
                   </text>
                 </g>
               );
@@ -283,7 +283,7 @@ export const AdventureView: React.FC<AdventureViewProps> = ({
             <div className="rounded-lg bg-[#19130e] p-2 border border-amber-500/15">
               <div className="text-[10px] text-stone-400 uppercase">Reward</div>
               <div className="font-mono text-xs font-bold text-emerald-300">
-                +{selectedNode.rewardGems}💎
+                +{selectedNode.rewardGems} Gems
               </div>
             </div>
           </div>

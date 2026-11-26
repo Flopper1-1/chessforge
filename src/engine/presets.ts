@@ -1,6 +1,7 @@
 import {
   AdventureNode,
   BoardDefinition,
+  Color,
   PieceDefinition,
   PlacedPiece,
   TileConfig,
@@ -272,7 +273,7 @@ export const BUILTIN_PIECES: PieceDefinition[] = [
 ];
 
 let uidCounter = 1;
-export function makePiece(pieceId: string, color: 'white' | 'black'): PlacedPiece {
+export function makePiece(pieceId: string, color: Color): PlacedPiece {
   return {
     id: `${color[0]}_${pieceId}_${uidCounter++}`,
     pieceId,
@@ -666,11 +667,105 @@ function buildRoyalTwinKings(): BoardDefinition {
   };
 }
 
+function buildFourPlayerCross(): BoardDefinition {
+  const { tiles, pieces } = createEmptyGrid(12, 12);
+  // Carve 2x2 Void corners to form a classic 4-player cross arena
+  for (let r = 0; r < 12; r++) {
+    for (let c = 0; c < 12; c++) {
+      const inTop = r < 2;
+      const inBot = r >= 10;
+      const inLeft = c < 2;
+      const inRight = c >= 10;
+      if ((inTop || inBot) && (inLeft || inRight)) {
+        tiles[r][c] = { rule: 'void' };
+      }
+    }
+  }
+  // Central 2x2 promotion/battlefield hub
+  tiles[5][5] = { rule: 'promotion', promotionFor: 'all' };
+  tiles[5][6] = { rule: 'promotion', promotionFor: 'all' };
+  tiles[6][5] = { rule: 'promotion', promotionFor: 'all' };
+  tiles[6][6] = { rule: 'promotion', promotionFor: 'all' };
+
+  const line = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+  for (let i = 0; i < 8; i++) {
+    const idx = i + 2;
+    // Black (North, marches South)
+    pieces[0][idx] = makePiece(line[i], 'black');
+    pieces[1][idx] = makePiece('pawn', 'black');
+    // White (South, marches North)
+    pieces[11][idx] = makePiece(line[i], 'white');
+    pieces[10][idx] = makePiece('pawn', 'white');
+    // Red (West, marches East)
+    pieces[idx][0] = makePiece(line[i], 'red');
+    pieces[idx][1] = makePiece('pawn', 'red');
+    // Blue (East, marches West)
+    pieces[idx][11] = makePiece(line[i], 'blue');
+    pieces[idx][10] = makePiece('pawn', 'blue');
+  }
+
+  return {
+    id: 'four-player-cross',
+    name: '4-Player Grand Cross',
+    description: 'Four armies (White, Black, Red, Blue) battle in a 12×12 cross arena. Last player standing wins!',
+    rows: 12,
+    cols: 12,
+    players: ['white', 'red', 'black', 'blue'],
+    tiles,
+    initialPieces: pieces,
+    theme: 'stone',
+    difficulty: 2,
+    isBuiltin: true,
+  };
+}
+
+function buildThreePlayerCitadel(): BoardDefinition {
+  const { tiles, pieces } = createEmptyGrid(10, 10);
+  // Carve left-top and left-bottom 2x2 corners for clean 3-player geometry
+  for (const [r, c] of [[0, 0], [0, 1], [1, 0], [1, 1], [8, 0], [8, 1], [9, 0], [9, 1]]) {
+    tiles[r][c] = { rule: 'void' };
+  }
+  tiles[4][5] = { rule: 'sanctuary' };
+  tiles[5][5] = { rule: 'sanctuary' };
+  tiles[4][8] = { rule: 'promotion', promotionFor: 'all' };
+  tiles[5][8] = { rule: 'promotion', promotionFor: 'all' };
+
+  const line = ['rook', 'knight', 'bishop', 'king', 'queen', 'knight'];
+  for (let i = 0; i < 6; i++) {
+    const idx = i + 2;
+    // Black (North)
+    pieces[0][idx] = makePiece(line[i], 'black');
+    pieces[1][idx] = makePiece('pawn', 'black');
+    // White (South)
+    pieces[9][idx] = makePiece(line[i], 'white');
+    pieces[8][idx] = makePiece('pawn', 'white');
+    // Red (West)
+    pieces[idx][0] = makePiece(line[i], 'red');
+    pieces[idx][1] = makePiece('pawn', 'red');
+  }
+
+  return {
+    id: 'three-player-citadel',
+    name: '3-Player Tri-Citadel',
+    description: 'Three-way tactical battle between White, Red, and Black on a 10×10 fortress board.',
+    rows: 10,
+    cols: 10,
+    players: ['white', 'red', 'black'],
+    tiles,
+    initialPieces: pieces,
+    theme: 'emerald',
+    difficulty: 2,
+    isBuiltin: true,
+  };
+}
+
 export const BUILTIN_BOARDS: BoardDefinition[] = [
   buildAcademySkirmish(),
   buildAcademyArchers(),
   buildSanctuaryGarden(),
   buildClassicChess(),
+  buildFourPlayerCross(),
+  buildThreePlayerCitadel(),
   buildIronGate(),
   buildCrumblingBridge(),
   buildIronFortress(),

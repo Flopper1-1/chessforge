@@ -162,7 +162,11 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                   }`}
                   title="Stone Wall (Blocks sliding pieces; leapers can jump over)"
                 >
-                  {!compact && <span className="text-xs opacity-75">🧱</span>}
+                  {!compact && (
+                    <span className="text-[9px] font-mono font-bold tracking-tight text-stone-200 bg-stone-900/70 px-1 rounded">
+                      WALL
+                    </span>
+                  )}
                 </button>
               );
             }
@@ -185,12 +189,12 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 }`}
                 aria-label={`${String.fromCharCode(97 + c)}${rows - r}${pieceDef ? ` ${piece?.color} ${pieceDef.name}` : ''}`}
               >
-                {/* Tile rule visuals */}
+                {/* Tile rule visuals (clean typographic badges, zero emojis) */}
                 {tile.rule === 'sanctuary' && (
                   <div className="absolute inset-0.5 rounded-sm border-2 border-amber-300/85 bg-amber-400/20 pointer-events-none flex items-start justify-end p-0.5">
                     {!compact && (
-                      <span className="text-[9px] leading-none font-bold text-amber-950 bg-amber-300/90 px-1 rounded">
-                        🛡
+                      <span className="text-[8px] leading-none font-mono font-bold text-amber-950 bg-amber-300/95 px-1 py-0.5 rounded">
+                        SAFE
                       </span>
                     )}
                   </div>
@@ -207,8 +211,8 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                     }`}
                   >
                     {!compact && (
-                      <span className="text-[9px] leading-none font-mono font-bold text-white bg-black/60 px-1 rounded">
-                        {tile.portalChannel ?? 'A'}
+                      <span className="text-[8px] leading-none font-mono font-bold text-white bg-black/70 px-1 py-0.5 rounded">
+                        P{tile.portalChannel ?? 'A'}
                       </span>
                     )}
                   </div>
@@ -217,15 +221,19 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {tile.rule === 'promotion' && !compact && (
                   <div className="absolute inset-0 pointer-events-none flex items-start justify-start p-0.5">
                     <span
-                      className={`text-[9px] leading-none font-bold px-1 rounded ${
+                      className={`text-[8px] leading-none font-mono font-bold px-1 py-0.5 rounded ${
                         tile.promotionFor === 'white'
-                          ? 'bg-amber-100/80 text-amber-900'
+                          ? 'bg-amber-100/90 text-amber-950'
                           : tile.promotionFor === 'black'
-                            ? 'bg-stone-900/70 text-amber-300'
-                            : 'bg-amber-500/80 text-stone-950'
+                            ? 'bg-stone-900/85 text-amber-300'
+                            : tile.promotionFor === 'red'
+                              ? 'bg-red-600/90 text-white'
+                              : tile.promotionFor === 'blue'
+                                ? 'bg-blue-600/90 text-white'
+                                : 'bg-amber-500/90 text-stone-950'
                       }`}
                     >
-                      ★
+                      PRO
                     </span>
                   </div>
                 )}
@@ -233,8 +241,8 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {tile.rule === 'fallow' && (
                   <div className="absolute inset-0.5 border border-dashed border-orange-900/80 bg-orange-950/20 pointer-events-none flex items-end justify-end p-0.5">
                     {!compact && (
-                      <span className="text-[9px] leading-none font-mono font-bold bg-orange-950/85 text-orange-200 px-1 rounded">
-                        {tile.fallowUses ?? 0}
+                      <span className="text-[8px] leading-none font-mono font-bold bg-orange-950/85 text-orange-200 px-1 py-0.5 rounded">
+                        {tile.fallowUses ?? 0}x
                       </span>
                     )}
                   </div>
@@ -243,8 +251,8 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {tile.rule === 'ice' && (
                   <div className="absolute inset-0.5 border border-cyan-300/80 bg-cyan-300/25 pointer-events-none flex items-start justify-end p-0.5">
                     {!compact && (
-                      <span className="text-[9px] leading-none font-bold text-cyan-950 bg-cyan-200/90 px-1 rounded">
-                        ❄
+                      <span className="text-[8px] leading-none font-mono font-bold text-cyan-950 bg-cyan-200/95 px-1 py-0.5 rounded">
+                        ICE
                       </span>
                     )}
                   </div>
@@ -253,8 +261,8 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {tile.rule === 'trap' && (
                   <div className="absolute inset-0.5 border border-rose-500/80 bg-rose-600/20 pointer-events-none flex items-start justify-end p-0.5">
                     {!compact && (
-                      <span className="text-[9px] leading-none font-bold text-white bg-rose-700/90 px-1 rounded">
-                        ⚠
+                      <span className="text-[8px] leading-none font-mono font-bold text-white bg-rose-700/95 px-1 py-0.5 rounded">
+                        TRAP
                       </span>
                     )}
                   </div>
@@ -263,8 +271,8 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {tile.rule === 'boost' && (
                   <div className="absolute inset-0.5 border-2 border-emerald-400/80 bg-emerald-400/20 pointer-events-none flex items-start justify-end p-0.5">
                     {!compact && (
-                      <span className="text-[9px] leading-none font-bold text-emerald-950 bg-emerald-300/90 px-1 rounded">
-                        ⚡
+                      <span className="text-[8px] leading-none font-mono font-bold text-emerald-950 bg-emerald-300/95 px-1 py-0.5 rounded">
+                        +1
                       </span>
                     )}
                   </div>
@@ -273,8 +281,8 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {tile.rule === 'summit' && (
                   <div className="absolute inset-0.5 border-2 border-yellow-300 bg-yellow-400/30 pointer-events-none flex items-start justify-end p-0.5">
                     {!compact && (
-                      <span className="text-[9px] leading-none font-bold text-yellow-950 bg-yellow-300 px-1 rounded">
-                        ♛
+                      <span className="text-[8px] leading-none font-mono font-bold text-yellow-950 bg-yellow-300 px-1 py-0.5 rounded">
+                        HILL
                       </span>
                     )}
                   </div>
@@ -315,12 +323,12 @@ export const ChessBoardView: React.FC<ChessBoardViewProps> = ({
                 {targetMove && (
                   <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                     {targetMove.castling ? (
-                      <div className="px-1.5 py-0.5 rounded-full bg-amber-400/95 text-stone-950 text-[10px] font-extrabold shadow-md border border-amber-100">
-                        ⇄
+                      <div className="px-1.5 py-0.5 rounded bg-amber-400/95 text-stone-950 text-[9px] font-mono font-extrabold shadow-md border border-amber-100">
+                        O-O
                       </div>
                     ) : targetMove.isSwap ? (
-                      <div className="px-1.5 py-0.5 rounded-full bg-cyan-400/95 text-stone-950 text-[10px] font-extrabold shadow-md border border-cyan-100">
-                        ⇄
+                      <div className="px-1.5 py-0.5 rounded bg-cyan-400/95 text-stone-950 text-[9px] font-mono font-extrabold shadow-md border border-cyan-100">
+                        SWP
                       </div>
                     ) : targetMove.isRangedCapture ? (
                       <div className="w-[88%] h-[88%] rounded-full border-[3px] border-amber-400 bg-red-600/30 animate-pulse" />

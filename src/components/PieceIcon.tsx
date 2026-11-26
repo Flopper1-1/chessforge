@@ -18,26 +18,31 @@ interface PieceIconProps {
 
 const PALETTES: Record<
   PiecePalette,
-  {
-    white: { fill: string; stroke: string; accent: string };
-    black: { fill: string; stroke: string; accent: string };
-  }
+  Record<Color, { fill: string; stroke: string; accent: string }>
 > = {
   ivory: {
     white: { fill: '#f8f1df', stroke: '#3a2a19', accent: '#d49a35' },
     black: { fill: '#262120', stroke: '#e6c580', accent: '#b8862e' },
+    red: { fill: '#dc2626', stroke: '#450a0a', accent: '#fca5a5' },
+    blue: { fill: '#2563eb', stroke: '#172554', accent: '#93c5fd' },
   },
   royal_gold: {
     white: { fill: '#fff7d6', stroke: '#713f12', accent: '#f59e0b' },
     black: { fill: '#1e1b2e', stroke: '#c084fc', accent: '#a855f7' },
+    red: { fill: '#e11d48', stroke: '#4c0519', accent: '#fda4af' },
+    blue: { fill: '#0284c7', stroke: '#082f49', accent: '#7dd3fc' },
   },
   jade_ruby: {
     white: { fill: '#d1fae5', stroke: '#064e3b', accent: '#10b981' },
     black: { fill: '#4c0519', stroke: '#fda4af', accent: '#f43f5e' },
+    red: { fill: '#ea580c', stroke: '#431407', accent: '#fdba74' },
+    blue: { fill: '#4f46e5', stroke: '#1e1b4b', accent: '#a5b4fc' },
   },
   blueprint: {
     white: { fill: '#e0f2fe', stroke: '#0c4a6e', accent: '#38bdf8' },
     black: { fill: '#0f172a', stroke: '#93c5fd', accent: '#60a5fa' },
+    red: { fill: '#f43f5e', stroke: '#4c0519', accent: '#fecdd3' },
+    blue: { fill: '#14b8a6', stroke: '#042f2e', accent: '#99f6e4' },
   },
 };
 
@@ -93,15 +98,15 @@ export const PieceIcon: React.FC<PieceIconProps> = ({
     const px = customAppearance.pixels;
     return (
       <svg viewBox="0 0 44 44" className={className} aria-hidden="true">
-        {/* Team badge backing so White vs Black is always crystal clear */}
+        {/* Team badge backing so all 4 teams are always crystal clear */}
         <rect
           x="3"
           y="3"
           width="38"
           height="38"
           rx="8"
-          fill={isWhite ? '#f8f1df' : '#1e1a18'}
-          stroke={isWhite ? '#3a2a19' : '#e6c580'}
+          fill={scheme.fill}
+          stroke={scheme.stroke}
           strokeWidth="2.4"
         />
         {px.map((row, r) =>

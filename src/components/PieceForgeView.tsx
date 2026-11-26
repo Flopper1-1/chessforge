@@ -29,14 +29,14 @@ const SLIDE_GRID: (Direction8 | 'CENTER')[] = [
 ];
 
 const HOP_BRUSHES: { mode: HopMode | 'erase'; symbol: string; label: string; colorClass: string }[] = [
-  { mode: 'both', symbol: '●', label: 'Move+Cap', colorClass: 'bg-emerald-600/35 border-emerald-400 text-emerald-100' },
-  { mode: 'move', symbol: '○', label: 'Move Only', colorClass: 'bg-sky-600/35 border-sky-400 text-sky-100' },
-  { mode: 'capture', symbol: '×', label: 'Cap Only', colorClass: 'bg-rose-600/35 border-rose-400 text-rose-100' },
-  { mode: 'first_move', symbol: '2', label: '1st Move', colorClass: 'bg-amber-600/35 border-amber-400 text-amber-100' },
+  { mode: 'both', symbol: 'M+C', label: 'Move+Cap', colorClass: 'bg-emerald-600/35 border-emerald-400 text-emerald-100' },
+  { mode: 'move', symbol: 'MOV', label: 'Move Only', colorClass: 'bg-sky-600/35 border-sky-400 text-sky-100' },
+  { mode: 'capture', symbol: 'CAP', label: 'Cap Only', colorClass: 'bg-rose-600/35 border-rose-400 text-rose-100' },
+  { mode: 'first_move', symbol: '1ST', label: '1st Move', colorClass: 'bg-amber-600/35 border-amber-400 text-amber-100' },
   { mode: 'en_passant', symbol: 'EP', label: 'En Passant', colorClass: 'bg-purple-600/35 border-purple-400 text-purple-100' },
-  { mode: 'ranged', symbol: '🎯', label: 'Ranged', colorClass: 'bg-orange-600/35 border-orange-400 text-orange-100' },
-  { mode: 'swap', symbol: '⇄', label: 'Ally Swap', colorClass: 'bg-cyan-600/35 border-cyan-400 text-cyan-100' },
-  { mode: 'erase', symbol: '⌫', label: 'Erase', colorClass: 'bg-stone-800 border-stone-500 text-stone-200' },
+  { mode: 'ranged', symbol: 'RNG', label: 'Ranged', colorClass: 'bg-orange-600/35 border-orange-400 text-orange-100' },
+  { mode: 'swap', symbol: 'SWP', label: 'Ally Swap', colorClass: 'bg-cyan-600/35 border-cyan-400 text-cyan-100' },
+  { mode: 'erase', symbol: 'CLR', label: 'Erase', colorClass: 'bg-stone-800 border-stone-500 text-stone-200' },
 ];
 
 const PIXEL_SWATCHES = [
@@ -286,7 +286,7 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
                   </span>
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-amber-100 truncate">
-                      {p.name} {!p.isBuiltin && <span className="text-amber-400">★</span>}
+                      {p.name} {!p.isBuiltin && <span className="text-[10px] font-mono text-amber-400 ml-1">CUSTOM</span>}
                     </div>
                     <div className="text-[10px] text-stone-400 font-mono">
                       {p.hops.length} hops · {Object.keys(p.slides).length} rays
