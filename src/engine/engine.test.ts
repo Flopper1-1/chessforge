@@ -106,17 +106,24 @@ describe('ChessForge Variant Engine', () => {
     expect(afterEp.grid[3][3]).toBeNull(); // captured black pawn removed!
   });
 
-  it('offers multiple promotion choices (Queen, Rook, Bishop, Knight) on promotion tiles', () => {
+  it('offers multiple promotion choices for Pawns and prevents non-promotable pieces (like Rooks) from promoting', () => {
     const b = emptyBoard(6, 6);
     b.tiles[0][2] = { rule: 'promotion', promotionFor: 'white' };
+    b.tiles[0][4] = { rule: 'promotion', promotionFor: 'white' };
     b.initialPieces[5][0] = makePiece('king', 'white');
     b.initialPieces[0][5] = makePiece('king', 'black');
     b.initialPieces[1][2] = makePiece('pawn', 'white');
+    b.initialPieces[1][4] = makePiece('rook', 'white');
 
     const state = createInitialGameState(b, registry);
     const moves = generateLegalMoves(state.tiles, state.grid, 'white', registry, getBoardRules(b));
     const promoMoves = moves.filter((m) => m.from.r === 1 && m.from.c === 2 && m.to.r === 0 && m.to.c === 2);
     expect(promoMoves.map((m) => m.promotedTo).sort()).toEqual(['bishop', 'knight', 'queen', 'rook']);
+
+    // Rook landing on promotion tile should NOT promote
+    const rookMoves = moves.filter((m) => m.from.r === 1 && m.from.c === 4 && m.to.r === 0 && m.to.c === 4);
+    expect(rookMoves.length).toBe(1);
+    expect(rookMoves[0].promotedTo).toBeUndefined();
 
     const knightPromo = promoMoves.find((m) => m.promotedTo === 'knight')!;
     const after = makeGameMove(state, knightPromo, registry);

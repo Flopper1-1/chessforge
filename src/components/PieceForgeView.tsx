@@ -60,7 +60,7 @@ function createBlankPiece(): PieceDefinition {
       { dr: -2, dc: 1, mode: 'both' },
     ],
     slides: { NE: 4, NW: 4 },
-    rules: { canPromote: true },
+    rules: { canPromote: false },
     isBuiltin: false,
   };
 }
@@ -792,6 +792,7 @@ export const PieceForgeView: React.FC<PieceForgeViewProps> = ({
                 ['phasing', 'Phasing Slider', 'Sliding rays pass through friendly pieces.'],
                 ['pawnDoubleStep', 'First Double-Step', 'May step 2 squares forward on first move.'],
                 ['enPassant', 'En Passant', 'Can perform and be captured by En Passant.'],
+                ['canPromote', 'Can Promote', 'Promotes when reaching a Promotion tile (Pawns only by default).'],
               ] as const
             ).map(([key, label, hint]) => (
               <label

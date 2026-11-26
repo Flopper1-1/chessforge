@@ -141,6 +141,7 @@ function buildPieceGraph(
       if (isImpassableTile(t)) continue;
       if (
         !def.rules.royal &&
+        def.rules.canPromote &&
         t.rule === 'promotion' &&
         (t.promotionFor === 'both' || t.promotionFor === 'all' || t.promotionFor === color) &&
         (t.promoteToPieceId || 'queen') !== def.id

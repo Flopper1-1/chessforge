@@ -205,7 +205,7 @@ function getPromotionOptions(
   lostByColor?: Record<Color, PlacedPiece[]>,
   triggeredByCapture = false
 ): string[] | undefined {
-  if (def.rules.royal || def.rules.canPromote === false) return undefined;
+  if (def.rules.royal || !def.rules.canPromote) return undefined;
 
   const onPromoTile =
     tile.rule === 'promotion' &&
